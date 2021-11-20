@@ -818,5 +818,164 @@ jointToursHHSizeProp.to_csv(vizOutputDir + r'\JointToursHHSize.csv', index = Fal
 t8 = time.time()
 print(t8 - t7)
 
+print('Summarizing TOD Profiles')
+tod = pd.crosstab(tables['tours']['start_period'], tables['tours']['TOURPURP'])
+jtod = pd.crosstab(tables['unique_joint_tours']['start_period'], tables['unique_joint_tours']['JOINT_PURP'])
+todDepProfile = pd.DataFrame(index = tod.index)
+todDepProfile['work'] = tod[1]
+todDepProfile['univ'] = tod[2]
+todDepProfile['sch'] = tod[3]
+todDepProfile['esc'] = tod[4]
+todDepProfile['imain'] = tod[5] + tod[6]
+todDepProfile['idisc'] = tod[7] + tod[8] + tod[9]
+todDepProfile['jmain'] = jtod[5] + jtod[6]
+todDepProfile['jdisc'] = jtod[7] + jtod[8] + jtod[9]
+todDepProfile['atwork'] = tod[10]
+todDepProfile['Total'] = todDepProfile.sum(1)
+todDepProfile.fillna(0).to_csv(vizOutputDir + r'\todDepProfile.csv')
+
+tod = pd.crosstab(tables['tours']['end_period'], tables['tours']['TOURPURP'])
+jtod = pd.crosstab(tables['unique_joint_tours']['end_period'], tables['unique_joint_tours']['JOINT_PURP'])
+todArrProfile = pd.DataFrame(index = tod.index)
+todArrProfile['work'] = tod[1]
+todArrProfile['univ'] = tod[2]
+todArrProfile['sch'] = tod[3]
+todArrProfile['esc'] = tod[4]
+todArrProfile['imain'] = tod[5] + tod[6]
+todArrProfile['idisc'] = tod[7] + tod[8] + tod[9]
+todArrProfile['jmain'] = jtod[5] + jtod[6]
+todArrProfile['jdisc'] = jtod[7] + jtod[8] + jtod[9]
+todArrProfile['atwork'] = tod[10]
+todArrProfile['Total'] = todArrProfile.sum(1)
+todArrProfile.fillna(0).to_csv(vizOutputDir + r'\todArrProfile.csv')
+
+tod = pd.crosstab(tables['tours']['tourdur'], tables['tours']['TOURPURP'])
+jtod = pd.crosstab(tables['unique_joint_tours']['tourdur'], tables['unique_joint_tours']['JOINT_PURP'])
+todDurProfile = pd.DataFrame(index = tod.index)
+todDurProfile['work'] = tod[1]
+todDurProfile['univ'] = tod[2]
+todDurProfile['sch'] = tod[3]
+todDurProfile['esc'] = tod[4]
+todDurProfile['imain'] = tod[5] + tod[6]
+todDurProfile['idisc'] = tod[7] + tod[8] + tod[9]
+todDurProfile['jmain'] = jtod[5] + jtod[6]
+todDurProfile['jdisc'] = jtod[7] + jtod[8] + jtod[9]
+todDurProfile['atwork'] = tod[10]
+todDurProfile['Total'] = todDurProfile.sum(1)
+todDurProfile.fillna(0).to_csv(vizOutputDir + r'\todDurProfile.csv')
+
+##stops by direction, purpose and model tod
+def classify_tod(period):
+    if period >= 4 and period <= 9:
+        return 1
+    if period >= 10 and period <= 22:
+        return 2
+    if period >= 23 and period <= 29:
+        return 3
+    if period >= 30 and period <= 40:
+        return 4
+    else:
+        return 5
+
+tables['tours']['start_tod'] = tables['tours']['start_period'].apply(classify_tod)
+tables['tours']['end_tod'] = tables['tours']['end_period'].apply(classify_tod)
+tables['unique_joint_tours']['start_tod'] = tables['unique_joint_tours']['start_period'].apply(classify_tod)
+tables['unique_joint_tours']['end_tod'] = tables['unique_joint_tours']['end_period'].apply(classify_tod)
+
+stops_ib_tod = tables['tours'][['num_ib_stops', 'tour_purpose', 'start_tod', 'end_tod']].groupby(['tour_purpose', 'start_tod', 'end_tod']).sum().reset_index().sort_values(['end_tod', 'start_tod', 'tour_purpose'])
+stops_ob_tod = tables['tours'][['num_ob_stops', 'tour_purpose', 'start_tod', 'end_tod']].groupby(['tour_purpose', 'start_tod', 'end_tod']).sum().reset_index().sort_values(['end_tod', 'start_tod', 'tour_purpose'])
+jstops_ib_tod = tables['unique_joint_tours'][['num_ib_stops', 'tour_purpose', 'start_tod', 'end_tod']].groupby(['tour_purpose', 'start_tod', 'end_tod']).sum().reset_index().sort_values(['end_tod', 'start_tod', 'tour_purpose'])
+jstops_ob_tod = tables['unique_joint_tours'][['num_ob_stops', 'tour_purpose', 'start_tod', 'end_tod']].groupby(['tour_purpose', 'start_tod', 'end_tod']).sum().reset_index().sort_values(['end_tod', 'start_tod', 'tour_purpose'])
+
+stops_ib_tod.to_csv(vizOutputDir + r'\todStopsIB.csv', index = False)
+stops_ob_tod.to_csv(vizOutputDir + r'\todStopsOB.csv', index = False)
+jstops_ib_tod.to_csv(vizOutputDir + r'\todStopsIB_joint.csv', index = False)
+jstops_ob_tod.to_csv(vizOutputDir + r'\todStopsOB_joint.csv', index = False)
+
+# prepare input for visualizer
+todDepProfile_vis = todDepProfile.reset_index().rename(columns = {'start_period': 'id'})
+todDepProfile_vis = pd.melt(todDepProfile_vis, ['id']).rename(columns = {'variable': 'purpose', 'value': 'freq_dep'})
+todArrProfile_vis = todArrProfile.reset_index().rename(columns = {'end_period': 'id'})
+todArrProfile_vis = pd.melt(todArrProfile_vis, ['id']).rename(columns = {'variable': 'purpose', 'value': 'freq_arr'})
+todDurProfile_vis = todDurProfile.reset_index().rename(columns = {'tourdur': 'id'})
+todDurProfile_vis = pd.melt(todDurProfile_vis, ['id']).rename(columns = {'variable': 'purpose', 'value': 'freq_dur'})
+
+todProfile_vis = todDepProfile_vis.copy()
+todProfile_vis['freq_arr'] = todArrProfile_vis['freq_arr']
+todProfile_vis['freq_dur'] = todDurProfile_vis['freq_dur']
+todProfile_vis = todProfile_vis.sort_values(['id', 'purpose']).fillna(0)
+todProfile_vis.to_csv(vizOutputDir + r'\todProfile_vis.csv')
+
+t9 = time.time()
+
+print('Summarizing Tour Mode')
+
+def SummarizeTourMode(itours, jtours, qry):
+    isubset = itours[['AUTOSUFF', 'TOURMODE', 'TOURPURP']].query(qry)
+    jsubset = jtours[['AUTOSUFF', 'TOURMODE', 'JOINT_PURP']].query(qry)
+    itoursByMode = pd.crosstab(isubset['TOURMODE'], isubset['TOURPURP'])
+    jtoursByMode = pd.crosstab(jsubset['TOURMODE'], jsubset['JOINT_PURP'])
+
+    profile = pd.DataFrame(index = itoursByMode.index)
+    profile['work'] = itoursByMode[1]
+    profile['univ'] = itoursByMode[2]
+    profile['sch'] = itoursByMode[3]
+    profile['imain'] = itoursByMode[4] + itoursByMode[5] + itoursByMode[6]
+    profile['idisc'] = itoursByMode[7] + itoursByMode[8] + itoursByMode[9]
+    profile['jmain'] = jtoursByMode[5] + jtoursByMode[6]
+    profile['jdisc'] = jtoursByMode[7] + jtoursByMode[8] + jtoursByMode[9]
+    profile['atwork'] = itoursByMode[10]
+    profile['Total'] = profile.sum(1)
+    
+    return profile.fillna(0)
+
+tmodeAS0Profile = SummarizeTourMode(tables['tours'], tables['unique_joint_tours'], 'AUTOSUFF == 0')
+tmodeAS1Profile = SummarizeTourMode(tables['tours'], tables['unique_joint_tours'], 'AUTOSUFF == 1')
+tmodeAS2Profile = SummarizeTourMode(tables['tours'], tables['unique_joint_tours'], 'AUTOSUFF == 2')
+
+tmodeAS0Profile.to_csv(vizOutputDir + r'\tmodeAS0Profile.csv', index = False)
+tmodeAS1Profile.to_csv(vizOutputDir + r'\tmodeAS1Profile.csv', index = False)
+tmodeAS2Profile.to_csv(vizOutputDir + r'\tmodeAS2Profile.csv', index = False)
+
+tmodeAS0Profile_vis = pd.melt(tmodeAS0Profile.reset_index(), ['TOURMODE']).rename(columns = {'TOURMODE': 'id', 'variable': 'purpose', 'value': 'freq_as0'}).set_index(['id', 'purpose'])
+tmodeAS1Profile_vis = pd.melt(tmodeAS1Profile.reset_index(), ['TOURMODE']).rename(columns = {'TOURMODE': 'id', 'variable': 'purpose', 'value': 'freq_as1'}).set_index(['id', 'purpose'])
+tmodeAS2Profile_vis = pd.melt(tmodeAS2Profile.reset_index(), ['TOURMODE']).rename(columns = {'TOURMODE': 'id', 'variable': 'purpose', 'value': 'freq_as2'}).set_index(['id', 'purpose'])
+
+#tmodeProfile_vis_index = pd.melt(pd.DataFrame(np.ones_like(tmodeAS0Profile), tmodeAS0Profile.index, tmodeAS0Profile.columns).reset_index(), ['TOURMODE']).set_index(['id', 'purpose']).index
+
+#tmodeProfile_vis = tmodeAS0Profile_vis.copy()
+#tmodeProfile_vis['freq_as1'] = tmodeAS1Profile_vis['freq_as1']
+#tmodeProfile_vis['freq_as2'] = tmodeAS2Profile_vis['freq_as2']
+#tmodeProfile_vis = tmodeProfile_vis.fillna(0)
+tmodeProfile_vis = pd.DataFrame({'freq_as0': tmodeAS0Profile_vis['freq_as0'],
+                                 'freq_as1': tmodeAS1Profile_vis['freq_as1'],
+                                 'freq_as2': tmodeAS2Profile_vis['freq_as2']}).fillna(0).reset_index()
+tmodeProfile_vis['freq_all'] = tmodeProfile_vis['freq_as0'] + tmodeProfile_vis['freq_as1'] + tmodeProfile_vis['freq_as2']
+tmodeProfile_vis['id'] = tmodeProfile_vis['id'].astype(str)
+tmodeProfile_vis = tmodeProfile_vis.sort_values(['purpose', 'id'])
+tmodeProfile_vis.to_csv(vizOutputDir + r'\tmodeProfile_vis.csv', index = False) #May need to fix order
+
+t10 = time.time()
+
+print('Summarizing Non-Mandatory Tour Lengths')
+
+bins = list(range(41)) + [9999]
+tourDistProfile = pd.DataFrame(index = bins[1:-1] + [41])
+tourDistProfile['esco'] = np.histogram(tables['tours'][['TOURPURP', 'tour_distance']].query('TOURPURP == 4')['tour_distance'], bins)[0]
+tourDistProfile['imain'] = np.histogram(tables['tours'][['TOURPURP', 'tour_distance']].query('TOURPURP >= 5 and TOURPURP <= 6')['tour_distance'], bins)[0]
+tourDistProfile['idisc'] = np.histogram(tables['tours'][['TOURPURP', 'tour_distance']].query('TOURPURP >= 7 and TOURPURP <= 9')['tour_distance'], bins)[0]
+tourDistProfile['jmain'] = np.histogram(tables['unique_joint_tours'][['JOINT_PURP', 'tour_distance']].query('JOINT_PURP >= 5 and JOINT_PURP <= 6')['tour_distance'], bins)[0]
+tourDistProfile['jdisc'] = np.histogram(tables['unique_joint_tours'][['JOINT_PURP', 'tour_distance']].query('JOINT_PURP >= 7 and JOINT_PURP <= 9')['tour_distance'], bins)[0]
+tourDistProfile['atwork'] = np.histogram(tables['tours'][['TOURPURP', 'tour_distance']].query('TOURPURP == 10')['tour_distance'], bins)[0]
+
+tourDistProfile.to_csv(vizOutputDir + r'\nonMandTourDistProfile.csv')
+
+tourDistProfile_vis = tourDistProfile.copy()
+tourDistProfile_vis['Total'] = tourDistProfile_vis.sum(1)
+tourDistProfile_vis = pd.melt(tourDistProfile_vis.reset_index(), ['index']).rename(columns = {'index': 'distbin', 'variable': 'PURPOSE', 'value': 'freq'})
+tourDistProfile_vis.to_csv(vizOutputDir + r'\tourDistProfile_vis.csv')
+
+t11 = time.time()
+
 print('Done')
-print(t8 - t0)
+print(t11 - t0)
