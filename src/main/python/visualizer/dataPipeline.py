@@ -103,7 +103,7 @@ if __name__ == '__main__':
     abm_outputs = {}
     readers = []
     for name in config['abm_outputs']['tables']:
-        readers.append(TableReader(abm_outputs, name, config['abm_outputs']['location'] + '\\' + config['abm_outputs']['tables'][name]))
+        readers.append(TableReader(abm_outputs, name, config['abm_outputs']['location'] + '\\' + config['abm_outputs']['tables'][name]['filepath']))
         readers[-1].start()
 
     for i in range(len(readers)):
@@ -111,8 +111,8 @@ if __name__ == '__main__':
 
     print('Creating Summaries')
     summaries = []
-    for summary in config['summaries']:
-        summaries.append(Summary.from_config(config['summary_location'], summary['summary'], abm_outputs))
+    for summary in config['summaries']['summaries']:
+        summaries.append(Summary.from_config(config['summaries']['location'], summary['summary'], abm_outputs))
         summaries[-1].start()
 
     for i in range(len(summaries)):

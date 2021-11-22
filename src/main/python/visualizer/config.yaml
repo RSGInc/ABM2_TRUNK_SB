@@ -1,26 +1,39 @@
 abm_outputs:
   location: C:\test\visualizer_conversion
   tables:
-    hh: output\householdData_3.csv
-    per: output\personData_3.csv
-    tours: output\indivTourData_3.csv
-    trips: output\indivTripData_3.csv
-    jtours: output\jointTourData_3.csv
-    jtrips: output\jointTripData_3.csv
-    wsLoc: output\wsLocResults_3.csv
-    aoResults: output\aoResults.csv
-    aoResults_Pre: output\aoResults_Pre.csv
-    visitor_trips: output\visitorTrips.csv
-    mazCorrespondence: visualizer\data\geographicXwalk_PMSA.csv
-summary_location: C:\test\pipeline
+    hh:
+      filepath: output\householdData_3.csv
+    per:
+      filepath: output\personData_3.csv
+    tours:
+      filepath: output\indivTourData_3.csv
+    trips:
+      filepath: output\indivTripData_3.csv
+    jtours:
+      filepath: output\jointTourData_3.csv
+    jtrips:
+      filepath: output\jointTripData_3.csv
+    wsLoc:
+      filepath: output\wsLocResults_3.csv
+    aoResults:
+      filepath: output\aoResults.csv
+    aoResults_Pre:
+      filepath: output\aoResults_Pre.csv
+    visitor_trips:
+      filepath: output\visitorTrips.csv
+    mazCorrespondence:
+      filepath: visualizer\data\geographicXwalk_PMSA.csv
+
 summaries:
-- summary:
-    type: count
-    filepath: autoOwnership.csv
-    table: aoResults
-    fields: 'AO'
-- summary:
-    type: count
-    filepath: autoOwnership_Pre.csv
-    table: aoResults_Pre
-    fields: 'AO'
+  location: C:\test\pipeline
+  summaries:
+  - summary:
+      type: count
+      filepath: autoOwnership.csv
+      table: aoResults
+      fields: 'AO'
+  - summary:
+      type: count
+      filepath: autoOwnership_Pre.csv
+      table: aoResults_Pre
+      fields: 'AO'
