@@ -907,6 +907,7 @@ todProfile_vis = todProfile_vis.sort_values(['id', 'purpose']).fillna(0)
 todProfile_vis.to_csv(vizOutputDir + r'\todProfile_vis.csv')
 
 t9 = time.time()
+print(t9 - t8)
 
 print('Summarizing Tour Mode')
 
@@ -956,6 +957,7 @@ tmodeProfile_vis = tmodeProfile_vis.sort_values(['purpose', 'id'])
 tmodeProfile_vis.to_csv(vizOutputDir + r'\tmodeProfile_vis.csv', index = False) #May need to fix order
 
 t10 = time.time()
+print(t10 - t9)
 
 print('Summarizing Non-Mandatory Tour Lengths')
 
@@ -975,7 +977,191 @@ tourDistProfile_vis['Total'] = tourDistProfile_vis.sum(1)
 tourDistProfile_vis = pd.melt(tourDistProfile_vis.reset_index(), ['index']).rename(columns = {'index': 'distbin', 'variable': 'PURPOSE', 'value': 'freq'})
 tourDistProfile_vis.to_csv(vizOutputDir + r'\tourDistProfile_vis.csv')
 
+## Output average trips lengths for visualizer
+avgTripLengths = pd.Series([tables['tours'][['TOURPURP', 'tour_distance']].query('TOURPURP == 4')['tour_distance'].mean(),
+                            tables['tours'][['TOURPURP', 'tour_distance']].query('TOURPURP >= 5 and TOURPURP <= 6')['tour_distance'].mean(),
+                            tables['tours'][['TOURPURP', 'tour_distance']].query('TOURPURP >= 7 and TOURPURP <= 9')['tour_distance'].mean(),
+                            tables['unique_joint_tours'][['JOINT_PURP', 'tour_distance']].query('JOINT_PURP >= 5 and JOINT_PURP <= 6')['tour_distance'].mean(),
+                            tables['unique_joint_tours'][['JOINT_PURP', 'tour_distance']].query('JOINT_PURP >= 7 and JOINT_PURP <= 9')['tour_distance'].mean(),
+                            tables['tours'][['TOURPURP', 'tour_distance']].query('TOURPURP == 10')['tour_distance'].mean(),
+                            np.hstack((tables['tours'][['TOURPURP', 'tour_distance']].query('TOURPURP >= 4')['tour_distance'],
+                                       tables['unique_joint_tours']['tour_distance'])).mean()],
+                           index = ["esco", "imain", "idisc", "jmain", "jdisc", "atwork", "Total"])
+
+avgTripLengths.index.name = 'purpose'
+avgTripLengths.to_csv(vizOutputDir + r'\nonMandTripLengths.csv')
+
 t11 = time.time()
+print(t11 - t10)
+print('Summarizing Stop Frequency')
+
+def summarizeStopFrequencies(itours, jtours, field, fp, tours = True):
+    if tours:
+        stopFreq = pd.DataFrame({'work': (itours[['TOURPURP', field]].query('TOURPURP == 1')[field]+1).value_counts().sort_index(),
+                                 'univ': (itours[['TOURPURP', field]].query('TOURPURP == 2')[field]+1).value_counts().sort_index(),
+                                 'sch': (itours[['TOURPURP', field]].query('TOURPURP == 3')[field]+1).value_counts().sort_index(),
+                                 'esco': (itours[['TOURPURP', field]].query('TOURPURP == 4')[field]+1).value_counts().sort_index(),
+                                 'imain': (itours[['TOURPURP', field]].query('TOURPURP >= 5 and TOURPURP <= 6')[field]+1).value_counts().sort_index(),
+                                 'idisc': (itours[['TOURPURP', field]].query('TOURPURP >= 7 and TOURPURP <= 9')[field]+1).value_counts().sort_index(),
+                                 'jmain': (jtours[['JOINT_PURP', field]].query('JOINT_PURP >= 5 and JOINT_PURP <= 6')[field]+1).value_counts().sort_index(),
+                                 'jdisc': (jtours[['JOINT_PURP', field]].query('JOINT_PURP >= 7 and JOINT_PURP <= 9')[field]+1).value_counts().sort_index(),
+                                 'atwork': (itours[['TOURPURP', field]].query('TOURPURP == 10')[field]+1).value_counts().sort_index()}).fillna(0)
+    else:
+        stopFreq = pd.DataFrame({'work': (itours[['TOURPURP', field]].query('TOURPURP == 1')[field]).value_counts().sort_index(),
+                                 'univ': (itours[['TOURPURP', field]].query('TOURPURP == 2')[field]).value_counts().sort_index(),
+                                 'sch': (itours[['TOURPURP', field]].query('TOURPURP == 3')[field]).value_counts().sort_index(),
+                                 'esco': (itours[['TOURPURP', field]].query('TOURPURP == 4')[field]).value_counts().sort_index(),
+                                 'imain': (itours[['TOURPURP', field]].query('TOURPURP >= 5 and TOURPURP <= 6')[field]).value_counts().sort_index(),
+                                 'idisc': (itours[['TOURPURP', field]].query('TOURPURP >= 7 and TOURPURP <= 9')[field]).value_counts().sort_index(),
+                                 'jmain': (jtours[['TOURPURP', field]].query('TOURPURP >= 5 and TOURPURP <= 6')[field]).value_counts().sort_index(),
+                                 'jdisc': (jtours[['TOURPURP', field]].query('TOURPURP >= 7 and TOURPURP <= 9')[field]).value_counts().sort_index(),
+                                 'atwork': (itours[['TOURPURP', field]].query('TOURPURP == 10')[field]).value_counts().sort_index()}).fillna(0)
+
+        for i in range(1, 11):
+            if i not in stopFreq.index:
+                stopFreq.loc[i] = np.zeros_like(stopFreq.columns, int)
+        stopFreq = stopFreq.sort_index()
+
+    stopFreq.to_csv(fp)
+    return stopFreq
+
+StopFreqOut = summarizeStopFrequencies(tables['tours'], tables['unique_joint_tours'], 'num_ob_stops', vizOutputDir + r'\stopFreqOutProfile.csv')
+StopFreqInb = summarizeStopFrequencies(tables['tours'], tables['unique_joint_tours'], 'num_ib_stops', vizOutputDir + r'\stopFreqInbProfile.csv')
+StopFreqTot = summarizeStopFrequencies(tables['tours'], tables['unique_joint_tours'], 'num_tot_stops', vizOutputDir + r'\stopFreqTotProfile.csv')
+
+StopFreqOut['Total'] = StopFreqOut.sum(1)
+StopFreqInb['Total'] = StopFreqInb.sum(1)
+StopFreqTot['Total'] = StopFreqTot.sum(1)
+
+stopFreqOut_vis = pd.melt(StopFreqOut.reset_index(), ['index']).rename(columns = {'variable': 'purpose', 'index': 'nstops', 'value': 'freq_out'}).set_index(['purpose', 'nstops'])
+stopFreqInb_vis = pd.melt(StopFreqInb.reset_index(), ['index']).rename(columns = {'variable': 'purpose', 'index': 'nstops', 'value': 'freq_inb'}).set_index(['purpose', 'nstops'])
+stopFreqDir_vis = pd.DataFrame({'freq_out': stopFreqOut_vis['freq_out'], 'freq_inb': stopFreqInb_vis['freq_inb']}).reset_index()#.sort_values('nstops')
+
+stopFreqDir_vis.to_csv(vizOutputDir + r'\stopfreqDir_vis.csv', index = False)
+StopFreq_vis = pd.melt(StopFreqTot.reset_index(), ['index']).rename(columns = {'variable': 'purpose', 'index': 'nstops', 'value': 'freq'})
+StopFreq_vis.to_csv(vizOutputDir + r'\stopfreq_total_vis.csv', index = False)
+
+#Stop purpose X TourPurpose
+stopFreq = summarizeStopFrequencies(stops, jstops, 'DPURP', vizOutputDir + r'\stopPurposeByTourPurpose.csv', False)
+stopFreq['Total'] = stopFreq.sum(1)
+StopFreq_vis = pd.melt(stopFreq.reset_index(), ['index']).rename(columns = {'variable': 'purpose', 'index': 'stop_purp', 'value': 'freq'})
+StopFreq_vis.to_csv(vizOutputDir + r'\stoppurpose_tourpurpose_vis.csv', index = False)
+
+stopFreq = pd.DataFrame(index = bins[1:-1] + [41, 42])
+stopFreq['work'] = np.histogram(stops[['TOURPURP', 'out_dir_dist']].query('TOURPURP == 1')['out_dir_dist'], [-9999] + bins)[0]
+stopFreq['univ'] = np.histogram(stops[['TOURPURP', 'out_dir_dist']].query('TOURPURP == 2')['out_dir_dist'], [-9999] + bins)[0] #Doesn't match RSG output for some reason
+stopFreq['sch'] = np.histogram(stops[['TOURPURP', 'out_dir_dist']].query('TOURPURP == 3')['out_dir_dist'], [-9999] + bins)[0]
+stopFreq['esco'] = np.histogram(stops[['TOURPURP', 'out_dir_dist']].query('TOURPURP == 4')['out_dir_dist'], [-9999] + bins)[0]
+stopFreq['imain'] = np.histogram(stops[['TOURPURP', 'out_dir_dist']].query('TOURPURP >= 5 and TOURPURP <= 6')['out_dir_dist'], [-9999] + bins)[0]
+stopFreq['idisc'] = np.histogram(stops[['TOURPURP', 'out_dir_dist']].query('TOURPURP >= 7 and TOURPURP <= 9')['out_dir_dist'], [-9999] + bins)[0]
+stopFreq['jmain'] = np.histogram(jstops[['TOURPURP', 'out_dir_dist']].query('TOURPURP >= 5 and TOURPURP <= 6')['out_dir_dist'], [-9999] + bins)[0]
+stopFreq['jdisc'] = np.histogram(jstops[['TOURPURP', 'out_dir_dist']].query('TOURPURP >= 7 and TOURPURP <= 9')['out_dir_dist'], [-9999] + bins)[0]
+stopFreq['atwork'] = np.histogram(stops[['TOURPURP', 'out_dir_dist']].query('TOURPURP == 10')['out_dir_dist'], [-9999] + bins)[0]
+stopFreq.to_csv(vizOutputDir + r'\stopOutOfDirectionDC.csv')
+
+stopFreq['Total'] = stopFreq.sum(1)
+stopDC_vis = pd.melt(stopFreq.reset_index(), ['index']).rename(columns = {'index': 'distbin', 'variable': 'PURPOSE', 'value': 'freq'})
+stopDC_vis.to_csv(vizOutputDir + r'\stopDC_vis.csv', index = False)
+
+avgStopOutofDirectionDist = pd.Series([stops[['TOURPURP', 'out_dir_dist']].query('TOURPURP == 1')['out_dir_dist'].mean(),
+                                       stops[['TOURPURP', 'out_dir_dist']].query('TOURPURP == 2')['out_dir_dist'].mean(), #Also not matching
+                                       stops[['TOURPURP', 'out_dir_dist']].query('TOURPURP == 3')['out_dir_dist'].mean(),
+                                       stops[['TOURPURP', 'out_dir_dist']].query('TOURPURP == 4')['out_dir_dist'].mean(),
+                                       stops[['TOURPURP', 'out_dir_dist']].query('TOURPURP >= 5 and TOURPURP <= 6')['out_dir_dist'].mean(),
+                                       stops[['TOURPURP', 'out_dir_dist']].query('TOURPURP >= 7 and TOURPURP <= 9')['out_dir_dist'].mean(),
+                                       jstops[['TOURPURP', 'out_dir_dist']].query('TOURPURP >= 5 and TOURPURP <= 6')['out_dir_dist'].mean(),
+                                       jstops[['TOURPURP', 'out_dir_dist']].query('TOURPURP >= 7 and TOURPURP <= 9')['out_dir_dist'].mean(),
+                                       stops[['TOURPURP', 'out_dir_dist']].query('TOURPURP == 10')['out_dir_dist'].mean(),
+                                       stops['out_dir_dist'].mean()],
+                                      index = ["work", "univ", "sch", "esco","imain", "idisc", "jmain", "jdisc", "atwork", "total"])
+avgStopOutofDirectionDist.to_csv(vizOutputDir + r'\avgStopOutofDirectionDist_vis.csv')
+
+StopDep = pd.DataFrame(index = bins[1:-1])
+StopDep['work'] = np.histogram(stops[['TOURPURP', 'stop_period']].query('TOURPURP == 1')['stop_period'], bins[1:])[0]
+StopDep['univ'] = np.histogram(stops[['TOURPURP', 'stop_period']].query('TOURPURP == 2')['stop_period'], bins[1:])[0]
+StopDep['sch'] = np.histogram(stops[['TOURPURP', 'stop_period']].query('TOURPURP == 3')['stop_period'], bins[1:])[0]
+StopDep['esco'] = np.histogram(stops[['TOURPURP', 'stop_period']].query('TOURPURP == 4')['stop_period'], bins[1:])[0]
+StopDep['imain'] = np.histogram(stops[['TOURPURP', 'stop_period']].query('TOURPURP >= 5 and TOURPURP <= 6')['stop_period'], bins[1:])[0]
+StopDep['idisc'] = np.histogram(stops[['TOURPURP', 'stop_period']].query('TOURPURP >= 7 and TOURPURP <= 9')['stop_period'], bins[1:])[0]
+StopDep['jmain'] = np.histogram(jstops[['TOURPURP', 'stop_period']].query('TOURPURP >= 5 and TOURPURP <= 6')['stop_period'], bins[1:])[0]
+StopDep['jdisc'] = np.histogram(jstops[['TOURPURP', 'stop_period']].query('TOURPURP >= 7 and TOURPURP <= 9')['stop_period'], bins[1:])[0]
+StopDep['atwork'] = np.histogram(stops[['TOURPURP', 'stop_period']].query('TOURPURP == 10')['stop_period'], bins[1:])[0]
+StopDep.to_csv(vizOutputDir + r'\stopDeparture.csv')
+
+TripDep = pd.DataFrame(index = bins[1:-1])
+TripDep['work'] = np.histogram(tables['trips'][['TOURPURP', 'stop_period']].query('TOURPURP == 1')['stop_period'], bins[1:])[0]
+TripDep['univ'] = np.histogram(tables['trips'][['TOURPURP', 'stop_period']].query('TOURPURP == 2')['stop_period'], bins[1:])[0]
+TripDep['sch'] = np.histogram(tables['trips'][['TOURPURP', 'stop_period']].query('TOURPURP == 3')['stop_period'], bins[1:])[0]
+TripDep['esco'] = np.histogram(tables['trips'][['TOURPURP', 'stop_period']].query('TOURPURP == 4')['stop_period'], bins[1:])[0]
+TripDep['imain'] = np.histogram(tables['trips'][['TOURPURP', 'stop_period']].query('TOURPURP >= 5 and TOURPURP <= 6')['stop_period'], bins[1:])[0]
+TripDep['idisc'] = np.histogram(tables['trips'][['TOURPURP', 'stop_period']].query('TOURPURP >= 7 and TOURPURP <= 9')['stop_period'], bins[1:])[0]
+TripDep['jmain'] = np.histogram(tables['jtrips'][['TOURPURP', 'stop_period']].query('TOURPURP >= 5 and TOURPURP <= 6')['stop_period'], bins[1:])[0]
+TripDep['jdisc'] = np.histogram(tables['jtrips'][['TOURPURP', 'stop_period']].query('TOURPURP >= 7 and TOURPURP <= 9')['stop_period'], bins[1:])[0]
+TripDep['atwork'] = np.histogram(tables['trips'][['TOURPURP', 'stop_period']].query('TOURPURP == 10')['stop_period'], bins[1:])[0]
+TripDep.to_csv(vizOutputDir + r'\tripDeparture.csv')
+
+StopDep['Total'] = StopDep.sum(1)
+TripDep['Total'] = TripDep.sum(1)
+
+StopDep_vis = pd.melt(StopDep.reset_index(), ['index']).rename(columns = {'index': 'id', 'variable': 'purpose', 'value': 'freq_stop'}).set_index(['id', 'purpose'])['freq_stop']
+TripDep_vis = pd.melt(TripDep.reset_index(), ['index']).rename(columns = {'index': 'id', 'variable': 'purpose', 'value': 'freq_trip'}).set_index(['id', 'purpose'])['freq_trip']
+stopTripDep_vis = pd.DataFrame({'freq_stop': StopDep_vis, 'freq_trip': TripDep_vis}).reset_index()
+stopTripDep_vis.to_csv(vizOutputDir + r'\stopTripDep_vis.csv', index = False)
+
+t12 = time.time()
+print(t12 - t11)
+
+print('Summarizing Trip Mode')
+def SummarizeTripMode(df, qry, fp):
+    tripModeProfile = pd.DataFrame(index = range(1, 14))
+    for i in range(1, 14):
+        tripModeProfile['tourmode%d'%(i)] = df[['TOURMODE', 'TOURPURP', 'TRIPMODE']].query(qry + ' and TRIPMODE > 0 and TOURMODE == %d'%(i))['TRIPMODE'].value_counts()
+    tripModeProfile = tripModeProfile.fillna(0)
+    tripModeProfile.to_csv(fp)
+    return tripModeProfile
+
+tripModeProfile = {}
+tripModeProfile[1] = SummarizeTripMode(tables['trips'], 'TOURPURP == 1', vizOutputDir + r'\tripModeProfile_Work.csv')
+tripModeProfile[2] = SummarizeTripMode(tables['trips'], 'TOURPURP == 2', vizOutputDir + r'\tripModeProfile_Univ.csv')
+tripModeProfile[3] = SummarizeTripMode(tables['trips'], 'TOURPURP == 3', vizOutputDir + r'\tripModeProfile_Schl.csv')
+tripModeProfile[4] = SummarizeTripMode(tables['trips'], 'TOURPURP >= 4 and TOURPURP <= 6', vizOutputDir + r'\tripModeProfile_iMain.csv')
+tripModeProfile[5] = SummarizeTripMode(tables['trips'], 'TOURPURP >= 7 and TOURPURP <= 9', vizOutputDir + r'\tripModeProfile_iDisc.csv')
+tripModeProfile[6] = SummarizeTripMode(tables['jtrips'], 'TOURPURP >= 4 and TOURPURP <= 6', vizOutputDir + r'\tripModeProfile_jMain.csv')
+tripModeProfile[7] = SummarizeTripMode(tables['jtrips'], 'TOURPURP >= 7 and TOURPURP <= 9', vizOutputDir + r'\tripModeProfile_jDisc.csv')
+tripModeProfile[8] = SummarizeTripMode(tables['trips'], 'TOURPURP == 10', vizOutputDir + r'\tripModeProfile_AtWork.csv')
+tripModeProfile[9] = SummarizeTripMode(tables['trips'], 'TOURPURP > 0', vizOutputDir + r'\tripModeProfile_Total.csv')
+tripModeProfile[9] += SummarizeTripMode(tables['jtrips'], 'TOURPURP > 0', vizOutputDir + r'\tripModeProfile_Total.csv')
+tripModeProfile[9].to_csv(vizOutputDir + r'\tripModeProfile_Total.csv')
+
+tripModeProfile_vis = pd.DataFrame()
+purps = ["",  "work", "univ", "schl", "imain", "idisc", "jmain", "jdisc", "atwork", "total"]
+for i in tripModeProfile:
+    tripModeProfile[i]['Total'] = tripModeProfile[i].sum(1)
+    tripModeProfile_vis[purps[i]] = pd.melt(tripModeProfile[i].reset_index(), ['index']).rename(columns = {'index': 'id', 'variable': 'tourmode'}).set_index(['id', 'tourmode'])['value']
+    
+tripModeProfile_vis = tripModeProfile_vis.reset_index().rename(columns = {'id': 'tripmode'})
+tripModeProfile_vis['tourmode'] = tripModeProfile_vis['tourmode'].map({'tourmode1': 'Auto SOV',
+                                                                       'tourmode2': 'Auto 2 Person',
+                                                                       'tourmode3': 'Auto 3+ Person',
+                                                                       'tourmode4': 'Walk',
+                                                                       'tourmode5': 'Bike/Moped',
+                                                                       'tourmode6': 'Walk-Transit',
+                                                                       'tourmode7': 'PNR-Transit',
+                                                                       'tourmode8': 'KNR-Transit',
+                                                                       'tourmode9': 'TNC-Transit',
+                                                                       'tourmode10': 'Taxi',
+                                                                       'tourmode11': 'TNC-Single',
+                                                                       'tourmode12': 'TNC-Shared',
+                                                                       'tourmode13': 'School Bus',
+                                                                       'Total': 'Total'})
+
+temp = pd.melt(tripModeProfile_vis, ['tripmode', 'tourmode'])
+temp['grp_var'] = temp['variable'] + temp['tourmode']
+temp = temp.rename(columns = {'variable': 'purpose'})
+temp.to_csv(vizOutputDir + r'\tripModeProfile_vis.csv')
+
+t13 = time.time()
+print(t13 - t12)
 
 print('Done')
-print(t11 - t0)
+print(t13 - t0)
