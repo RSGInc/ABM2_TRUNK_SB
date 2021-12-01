@@ -37,6 +37,52 @@ def pivot(df, row, col, val = None, f = sum):
 def count(df, cols):
     return df[cols].value_counts().sort_index().reset_index().rename(columns = {0: 'freq'})
 
+def addmargins(df, name = 'Total'):
+    for i in range(2):
+        df[name] = df.sum(1)
+        df = df.T
+    return df
+
+def get_flow_by_mode(df, mode, o, d, num):
+    '''
+    Gets flow by mode into table
+
+    Parameters
+    ----------
+    df (pandas.DataFrame):
+        Data frame of trips or tours
+    mode (str):
+        Field of `df` indicating mode
+    o (str):
+        Field of `df` indicating origin
+    d (str):
+        Field of `df` indicating destination
+    num (str):
+        Field of `df` indicating number of trips or tours
+
+    Returns
+    -------
+    grouped (pandas.DataFrame):
+        Data frame with the number of trips or tours for a given mode, origin, and destination
+    '''
+    grouped = df[[mode, o, d, num]].groupby([mode, o, d]).sum()[num].reset_index()
+    sets_present = list(zip(grouped[mode], grouped[o], grouped[d]))
+    modes = list(df[mode].value_counts().sort_index().index)
+    districts = list(set(list(df[o].value_counts().index) + list(df[d].value_counts().index)))
+    N = len(districts)
+    grouped = pd.DataFrame(columns = [mode, o, d, 'Freq'])
+    for i in modes:
+        mode_trips = df.query(mode + ' == @i')
+        flow = pd.DataFrame(np.zeros((N, N)), districts, districts)
+        flow.index.name = o
+        flow.columns.name = d
+        flow += pd.crosstab(mode_trips[o], mode_trips[d], mode_trips[num], aggfunc = sum)
+        flow = pd.melt(flow.fillna(0).reset_index(), [o], value_name = 'Freq')
+        flow[mode] = i*np.ones_like(flow.index)
+        grouped = pd.concat([grouped, flow[grouped.columns]])
+
+    return grouped.sort_values([d, o, mode])
+
 ABMOutputDir = r'C:\test\visualizer_conversion\output' #Copied from T:\ABM\ABM_FY19\model_runs\ABM2Plus\v1221\2016_1422new_sxu\output
 geogXWalkDir = os.path.split(ABMOutputDir)[0]
 SkimDir = r'T:\ABM\ABM_FY19\model_runs\ABM2Plus\v1221\2016_1422new_sxu\output'
@@ -83,6 +129,7 @@ ptype_map = {1: 'FT Worker',
              8: 'Pre-School'}
 
 tour_comp_map = {1: 'All Adult', 2: 'All Children', 3: 'Mixed'}
+esctype_map = {1: 'Ride Share', 2: 'Pure Escort', 3: 'No Escort', 'Total': 'Total'}
 
 t0 = time.time()
 print('Reading ABM Outputs')
@@ -148,7 +195,7 @@ t1 = time.time()
 print(t1 - t0)
 
 print('Reading Skims')
-skim = omx.open_file(skim_file)
+skim = omx.open_file(skim_file, 'r')
 skimLookup = pd.Series(skim.mapping('zone_number')).sort_values()
 N = len(skimLookup)
 #DST_SKM = np.concatenate((np.reshape(skim['MD_SOV_TR_H_DIST'], N**2), [-1]))
@@ -1160,8 +1207,185 @@ temp['grp_var'] = temp['variable'] + temp['tourmode']
 temp = temp.rename(columns = {'variable': 'purpose'})
 temp.to_csv(vizOutputDir + r'\tripModeProfile_vis.csv')
 
+###
+#trip mode by time period
+#calculate time of day
+tables['trips']['tod'] = tables['trips']['stop_period'].apply(classify_tod)
+tables['jtrips']['tod'] = tables['jtrips']['stop_period'].apply(classify_tod)
+
+itrips_summary = tables['trips'][['tod', 'TOURPURP', 'TOURMODE', 'TRIPMODE']].value_counts().reset_index().sort_values(['TRIPMODE', 'TOURMODE', 'TOURPURP', 'tod']).rename(columns = {0: 'num_trips'})
+jtrips_summary = tables['jtrips'][['tod', 'TOURPURP', 'TOURMODE', 'TRIPMODE']].value_counts().reset_index().sort_values(['TRIPMODE', 'TOURMODE', 'TOURPURP', 'tod']).rename(columns = {0: 'num_trips'})
+
+itrips_summary.to_csv(vizOutputDir + r'\itrips_tripmode_summary.csv', index = False)
+jtrips_summary.to_csv(vizOutputDir + r'\jtrips_tripmode_summary.csv', index = False)
+
 t13 = time.time()
 print(t13 - t12)
 
+print('Calculating Output Statistics')
+
+total_population = pertypeDistbn['freq'].sum()
+total_households = tables['hh'].shape[0]
+total_tours = tables['tours'].shape[0] + tables['unique_joint_tours']['NUMBER_HH'].sum()
+total_trips = tables['trips'].shape[0] + tables['jtrips'].shape[0]
+total_stops = stops.shape[0] + jstops.shape[0]
+
+tables['trips']['num_travel'] = tables['trips']['TRIPMODE'].map({1: 1, 2: 2, 3: 3.5, 10: 1.1, 11: 1.2, 12: 2}).fillna(0)
+tables['trips']['vmt'] = np.where(tables['trips']['num_travel'] > 0, tables['trips']['od_dist'] / tables['trips']['num_travel'], 0)
+total_vmt = tables['trips']['vmt'].sum()
+
+totals_df = pd.Series([total_population, total_households, total_tours, total_trips, total_stops, total_vmt],
+                      ["total_population", "total_households", "total_tours", "total_trips", "total_stops", "total_vmt"])
+totals_df.to_csv(vizOutputDir + r'\totals.csv')
+
+# HH Size distribution
+hhSizeDist = tables['hh'].value_counts().sort_index()
+hhSizeDist.to_csv(vizOutputDir + r'\hhSizeDist.csv')
+
+# Persons by person type
+actpertypeDistbn = tables['per'][['activity_pattern', 'PERTYPE']].query('activity_pattern != "H"')['PERTYPE'].value_counts().sort_index().reset_index()
+actpertypeDistbn.to_csv(vizOutputDir + r'\activePertypeDistbn.csv')
+
+t14 = time.time()
+print(t14 - t13)
+
+print('Generating school escorting summaries')
+
+# get driver person type
+
+tables['per']['hhper_id'] = 100*tables['per']['hh_id'] + tables['per']['person_num']
+tables['tours']['out_chauffuer_ptype'] = (100*tables['tours']['hh_id'] + tables['tours']['driver_num_out']).map(tables['per'].set_index('hhper_id')['PERTYPE'])
+tables['tours']['inb_chauffuer_ptype'] = (100*tables['tours']['hh_id'] + tables['tours']['driver_num_in']).map(tables['per'].set_index('hhper_id')['PERTYPE'])
+
+tables['tours'] = tables['tours'].fillna(0)
+print(1)
+tours_sample = tables['tours'].query('tour_purpose == "School" and person_type >= 6')
+print(2)
+# Code no escort as "3" to be same as OHAS data
+for col in ['escort_type_out', 'escort_type_in']:
+    tours_sample[col] = np.where(tours_sample[col] == 0, 3, tours_sample[col])
+print(3)
+# School tours by Escort Type X Child Type
+out_table1 = pd.crosstab(tours_sample['escort_type_out'], tours_sample['person_type'])
+inb_table1 = pd.crosstab(tours_sample['escort_type_in'], tours_sample['person_type'])
+print(4)
+# School tours by Escort Type X Chauffuer Type
+out_sample2 = tours_sample.query('out_chauffuer_ptype > 0')
+inb_sample2 = tours_sample.query('inb_chauffuer_ptype > 0')
+#out_table2 = out_sample2[['escort_type_out', 'person_type']]
+#inb_table2 = inb_sample2[['escort_type_out', 'person_type']]
+out_table2 = pd.crosstab(out_sample2['escort_type_out'], out_sample2['out_chauffuer_ptype'])
+inb_table2 = pd.crosstab(inb_sample2['escort_type_in'], inb_sample2['inb_chauffuer_ptype'])
+print(5)
+## Workers summary
+# summary of worker with a child which went to school
+# by escort type, can be separated by outbound and inbound direction
+print(6)
+#get list of active workers with at least one work tour
+active_workers = tables['tours'][['tour_purpose', 'person_type', 'hh_id', 'person_num']].query('tour_purpose in ["Work", "Work-Based"] and person_type in [1, 2]').groupby(['hh_id', 'person_num']).max()['person_type'].reset_index()
+print(7)
+#get list of students with at least one school tour
+active_students = tables['tours'][['tour_purpose', 'person_type', 'hh_id', 'person_num']].query('tour_purpose == "School" and person_type in [6, 7, 8]').groupby(['hh_id', 'person_num']).max()['person_type'].reset_index()
+active_students['active_student'] = np.ones_like(active_students.index)
+print(8)
+hh_active_student = active_students.groupby('hh_id').max()['active_student']
+print(9)
+#tag active workers with active students in household
+active_workers['active_student'] = active_workers['hh_id'].map(hh_active_student).fillna(0)
+print(10)
+#list of workers who did ride share or pure escort for school student
+out_rs_workers = tables['tours'][['hh_id', 'person_num', 'tour_id2', 'tour_purpose', 'escort_type_out', 'driver_num_out', 'out_chauffuer_ptype']].query('tour_purpose == "School" and escort_type_out == 1')[['hh_id', 'driver_num_out']].value_counts().sort_index().reset_index().rename(columns = {0: 'out_rs_escort'})
+out_pe_workers = tables['tours'][['hh_id', 'person_num', 'tour_id2', 'tour_purpose', 'escort_type_out', 'driver_num_out', 'out_chauffuer_ptype']].query('tour_purpose == "School" and escort_type_out == 2')[['hh_id', 'driver_num_out']].value_counts().sort_index().reset_index().rename(columns = {0: 'out_pe_escort'})
+inb_rs_workers = tables['tours'][['hh_id', 'person_num', 'tour_id2', 'tour_purpose', 'escort_type_in', 'driver_num_in', 'inb_chauffuer_ptype']].query('tour_purpose == "School" and escort_type_in == 1')[['hh_id', 'driver_num_in']].value_counts().sort_index().reset_index().rename(columns = {0: 'inb_rs_escort'})
+inb_pe_workers = tables['tours'][['hh_id', 'person_num', 'tour_id2', 'tour_purpose', 'escort_type_in', 'driver_num_in', 'inb_chauffuer_ptype']].query('tour_purpose == "School" and escort_type_in == 2')[['hh_id', 'driver_num_in']].value_counts().sort_index().reset_index().rename(columns = {0: 'inb_pe_escort'})
+print(11)
+active_workers = active_workers.merge(out_rs_workers, 'left', left_on = ['hh_id', 'person_num'], right_on = ['hh_id', 'driver_num_out'])
+active_workers = active_workers.merge(out_pe_workers, 'left', left_on = ['hh_id', 'person_num'], right_on = ['hh_id', 'driver_num_out'])
+active_workers = active_workers.merge(inb_rs_workers, 'left', left_on = ['hh_id', 'person_num'], right_on = ['hh_id', 'driver_num_in'])
+active_workers = active_workers.merge(inb_pe_workers, 'left', left_on = ['hh_id', 'person_num'], right_on = ['hh_id', 'driver_num_in'])
+print(12)
+active_workers = active_workers.fillna(0)
+print(13)
+active_workers['out_escort_type'] = np.where(active_workers['out_pe_escort'] > 0, 2,
+                                             np.where(active_workers['out_rs_escort'], 1, 3))
+active_workers['inb_escort_type'] = np.where(active_workers['inb_pe_escort'] > 0, 2,
+                                             np.where(active_workers['inb_rs_escort'], 1, 3))
+print(14)
+#worker_table = active_workers[['active_student', 'out_escort_type', 'inb_escort_type']].query('active_student == 1')[['out_escort_type', 'inb_escort_type']]
+temp = active_workers[['active_student', 'out_escort_type', 'inb_escort_type']].query('active_student == 1')
+worker_table = pd.crosstab(temp['out_escort_type'], temp['inb_escort_type'])
+print(15)
+## add marginal totals to all final tables
+out_table1['Total'] = out_table1.sum(1)
+inb_table1['Total'] = inb_table1.sum(1)
+out_table2['Total'] = out_table2.sum(1)
+inb_table2['Total'] = inb_table2.sum(1)
+worker_table = addmargins(worker_table)
+
+## reshape data in required form for visualizer
+ptype_map[4] = 'Non-Worker'
+ptype_map[7] = 'Non-DrivStudent'
+ptype_map[8] = 'Pre-Schooler'
+ptype_map['Total'] = 'Total'
+
+out_table1 = pd.melt(out_table1.reset_index(), ['escort_type_out']).rename(columns = {'escort_type_out': 'esc_type', 'person_type': 'child_type', 'value': 'freq_out'})
+inb_table1 = pd.melt(inb_table1.reset_index(), ['escort_type_in']).rename(columns = {'escort_type_in': 'esc_type', 'person_type': 'child_type', 'value': 'freq_inb'})
+table1 = out_table1.merge(inb_table1, on = ['esc_type', 'child_type'])
+table1['esc_type'] = table1['esc_type'].map(esctype_map)
+table1['child_type'] = table1['child_type'].map(ptype_map)
+
+out_table2 = pd.melt(out_table2.reset_index(), ['escort_type_out']).rename(columns = {'escort_type_out': 'esc_type', 'out_chauffuer_ptype': 'chauffuer', 'value': 'freq_out'})
+inb_table2 = pd.melt(inb_table2.reset_index(), ['escort_type_in']).rename(columns = {'escort_type_in': 'esc_type', 'inb_chauffuer_ptype': 'chauffuer', 'value': 'freq_inb'})
+table2 = out_table2.merge(inb_table2, on = ['esc_type', 'chauffuer'])
+table2['esc_type'] = table2['esc_type'].map(esctype_map)
+table2['chauffuer'] = table2['chauffuer'].map(ptype_map)
+
+worker_table = worker_table.reset_index().rename(columns = {**{'out_escort_type': 'DropOff'}, **esctype_map})
+worker_table['DropOff'] = worker_table['DropOff'].map(esctype_map)
+
+## write outputs
+table1.to_csv(vizOutputDir + r'\esctype_by_childtype.csv', index = False)
+table2.to_csv(vizOutputDir + r'\esctype_by_chauffeurtype.csv', index = False)
+worker_table.to_csv(vizOutputDir + r'\worker_school_escorting.csv', index = False)
+
+t15 = time.time()
+print(t15 - t14)
+
+print('Transit Tours and Trips By District')
+
+#tours
+tables['tours']['ODISTRICT'] = tables['tours']['orig_mgra'].map(tables['mazCorrespondence']['pmsa'])
+tables['tours']['DDISTRICT'] = tables['tours']['dest_mgra'].map(tables['mazCorrespondence']['pmsa'])
+tours_transit = tables['tours'][['ODISTRICT', 'DDISTRICT', 'tour_mode']].query('tour_mode >= 9 and tour_mode <= 12')
+tours_transit['NUMBER_HH'] = np.ones_like(tours_transit.index)
+
+tables['unique_joint_tours']['ODISTRICT'] = tables['unique_joint_tours']['orig_mgra'].map(tables['mazCorrespondence']['pmsa'])
+tables['unique_joint_tours']['DDISTRICT'] = tables['unique_joint_tours']['dest_mgra'].map(tables['mazCorrespondence']['pmsa'])
+unique_joint_tours_transit = tables['unique_joint_tours'][['ODISTRICT', 'DDISTRICT', 'tour_mode', 'NUMBER_HH']].query('tour_mode >= 9 and tour_mode <= 12')
+
+tours_transit_all = pd.concat([tours_transit, unique_joint_tours_transit])
+
+#district_flow_tours = tours_transit_all.groupby(['tour_mode', 'ODISTRICT', 'DDISTRICT']).sum()['NUMBER_HH'].reset_index().sort_values(['DDISTRICT', 'ODISTRICT', 'tour_mode'])
+district_flow_tours = get_flow_by_mode(tours_transit_all, 'tour_mode', 'ODISTRICT', 'DDISTRICT', 'NUMBER_HH')
+district_flow_tours.to_csv(vizOutputDir + r'\district_flow_transit_tours.csv')
+
+#trips
+tables['trips']['ODISTRICT'] = tables['trips']['orig_mgra'].map(tables['mazCorrespondence']['pmsa'])
+tables['trips']['DDISTRICT'] = tables['trips']['dest_mgra'].map(tables['mazCorrespondence']['pmsa'])
+trips_transit = tables['trips'][['ODISTRICT', 'DDISTRICT', 'trip_mode']].query('trip_mode >= 9 and trip_mode <= 12')
+trips_transit['num_participants'] = np.ones_like(trips_transit.index)
+
+tables['jtrips']['ODISTRICT'] = tables['jtrips']['orig_mgra'].map(tables['mazCorrespondence']['pmsa'])
+tables['jtrips']['DDISTRICT'] = tables['jtrips']['dest_mgra'].map(tables['mazCorrespondence']['pmsa'])
+jtrips_transit = tables['jtrips'][['ODISTRICT', 'DDISTRICT', 'trip_mode', 'num_participants']].query('trip_mode >= 9 and trip_mode <= 12')
+
+trips_transit_all = pd.concat([trips_transit, jtrips_transit])
+
+district_flow_trips = get_flow_by_mode(trips_transit_all, 'trip_mode', 'ODISTRICT', 'DDISTRICT', 'num_participants')
+district_flow_trips.to_csv(vizOutputDir + r'\district_flow_transit_trips.csv')
+
+t16 = time.time()
+print(t16 - t15)
+
 print('Done')
-print(t13 - t0)
+print(t15 - t0)
