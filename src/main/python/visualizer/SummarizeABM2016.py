@@ -81,7 +81,20 @@ def get_flow_by_mode(df, mode, o, d, num):
         flow[mode] = i*np.ones_like(flow.index)
         grouped = pd.concat([grouped, flow[grouped.columns]])
 
-    return grouped.sort_values([d, o, mode])
+    grouped = grouped.sort_values([d, o, mode]).reset_index()
+    del grouped['index']
+    grouped = grouped.reset_index()
+    grouped['index'] += 1
+    grouped = grouped.set_index('index')
+    grouped.index.name = None
+
+    return grouped
+
+def add_empty_bins(df):
+    for i in range(1, df.index.max()):
+        if i not in df.index:
+            df.loc[i] = np.zeros_like(df.columns)
+    return df.sort_index()
 
 ABMOutputDir = r'C:\test\visualizer_conversion\output' #Copied from T:\ABM\ABM_FY19\model_runs\ABM2Plus\v1221\2016_1422new_sxu\output
 geogXWalkDir = os.path.split(ABMOutputDir)[0]
@@ -312,9 +325,9 @@ for tlfd in [tlfd_work, tlfd_univ, tlfd_schl]:
         del tlfd[i]
     tlfd['Total'] = tlfd.sum(1)
 
-tlfd_work.to_csv(vizOutputDir + r'\workTLFD.csv')
-tlfd_univ.to_csv(vizOutputDir + r'\univTLFD.csv')
-tlfd_schl.to_csv(vizOutputDir + r'\schlTLFD.csv')
+add_empty_bins(tlfd_work).to_csv(vizOutputDir + r'\workTLFD.csv')
+add_empty_bins(tlfd_univ).to_csv(vizOutputDir + r'\univTLFD.csv')
+add_empty_bins(tlfd_schl).to_csv(vizOutputDir + r'\schlTLFD.csv')
 
 # Output avg trip lengths for visualizer
 workTripLengths = workers[['HDISTRICT', 'WorkLocationDistance']].groupby('HDISTRICT').sum()['WorkLocationDistance'] / workers[['HDISTRICT', 'WorkLocationDistance']].groupby('HDISTRICT').count()['WorkLocationDistance']
@@ -596,7 +609,11 @@ def write_table(df):
         text = text.replace('\n%d,'%(i), '\n')
     while ',,' in text:
         text = text.replace(',,', ',')
-    return('\n'.join((text[1:].replace('\n,', '\n').split('\n'))[:-1]))
+    lines = text[1:].replace('\n,', '\n').split('\n')
+    if lines[-1] == '':
+        return '\n'.join(lines[:-1])
+    else:
+        return '\n'.join(lines)
 
 fp = vizOutputDir + r'\indivNMTourFreq.csv'
 with open(fp, 'w') as f:
@@ -762,7 +779,7 @@ ptype_map['All'] = 'All'
 purpid2name['All'] = 'All'
 nm_tour_rates['PERTYPE'] = nm_tour_rates['PERTYPE'].map(ptype_map)
 nm_tour_rates['tour_purp'] = nm_tour_rates['tour_purp'].map(purpid2name)
-nm_tour_rates.to_csv(vizOutputDir + r'\nm_tours_rates.csv', index = False)
+nm_tour_rates.to_csv(vizOutputDir + r'\nm_tour_rates.csv', index = False)
 
 t1 = tables['tours'].query('TOURPURP < 10')['TOURPURP'].value_counts().sort_index()
 t3 = tables['unique_joint_tours']['JOINT_PURP'].value_counts().sort_index()
@@ -981,9 +998,9 @@ tmodeAS0Profile = SummarizeTourMode(tables['tours'], tables['unique_joint_tours'
 tmodeAS1Profile = SummarizeTourMode(tables['tours'], tables['unique_joint_tours'], 'AUTOSUFF == 1')
 tmodeAS2Profile = SummarizeTourMode(tables['tours'], tables['unique_joint_tours'], 'AUTOSUFF == 2')
 
-tmodeAS0Profile.to_csv(vizOutputDir + r'\tmodeAS0Profile.csv', index = False)
-tmodeAS1Profile.to_csv(vizOutputDir + r'\tmodeAS1Profile.csv', index = False)
-tmodeAS2Profile.to_csv(vizOutputDir + r'\tmodeAS2Profile.csv', index = False)
+add_empty_bins(tmodeAS0Profile).to_csv(vizOutputDir + r'\tmodeAS0Profile.csv')
+add_empty_bins(tmodeAS1Profile).to_csv(vizOutputDir + r'\tmodeAS1Profile.csv')
+add_empty_bins(tmodeAS2Profile).to_csv(vizOutputDir + r'\tmodeAS2Profile.csv')
 
 tmodeAS0Profile_vis = pd.melt(tmodeAS0Profile.reset_index(), ['TOURMODE']).rename(columns = {'TOURMODE': 'id', 'variable': 'purpose', 'value': 'freq_as0'}).set_index(['id', 'purpose'])
 tmodeAS1Profile_vis = pd.melt(tmodeAS1Profile.reset_index(), ['TOURMODE']).rename(columns = {'TOURMODE': 'id', 'variable': 'purpose', 'value': 'freq_as1'}).set_index(['id', 'purpose'])
@@ -1121,7 +1138,8 @@ avgStopOutofDirectionDist = pd.Series([stops[['TOURPURP', 'out_dir_dist']].query
                                        stops[['TOURPURP', 'out_dir_dist']].query('TOURPURP == 10')['out_dir_dist'].mean(),
                                        stops['out_dir_dist'].mean()],
                                       index = ["work", "univ", "sch", "esco","imain", "idisc", "jmain", "jdisc", "atwork", "total"])
-avgStopOutofDirectionDist.to_csv(vizOutputDir + r'\avgStopOutofDirectionDist_vis.csv')
+avgStopOutofDirectionDist.index.name = 'purpose'
+pd.DataFrame({'avgDist': avgStopOutofDirectionDist}).to_csv(vizOutputDir + r'\avgStopOutofDirectionDist_vis.csv')
 
 StopDep = pd.DataFrame(index = bins[1:-1])
 StopDep['work'] = np.histogram(stops[['TOURPURP', 'stop_period']].query('TOURPURP == 1')['stop_period'], bins[1:])[0]
@@ -1239,11 +1257,11 @@ totals_df = pd.Series([total_population, total_households, total_tours, total_tr
 totals_df.to_csv(vizOutputDir + r'\totals.csv')
 
 # HH Size distribution
-hhSizeDist = tables['hh'].value_counts().sort_index()
+hhSizeDist = pd.DataFrame({'freq': tables['hh']['HHSIZE'].value_counts().sort_index()})
 hhSizeDist.to_csv(vizOutputDir + r'\hhSizeDist.csv')
 
 # Persons by person type
-actpertypeDistbn = tables['per'][['activity_pattern', 'PERTYPE']].query('activity_pattern != "H"')['PERTYPE'].value_counts().sort_index().reset_index()
+actpertypeDistbn = tables['per'][['activity_pattern', 'PERTYPE']].query('activity_pattern != "H"')['PERTYPE'].value_counts().sort_index().reset_index().rename(columns = {'index': 'PERTYPE', 'PERTYPE': 'freq'})
 actpertypeDistbn.to_csv(vizOutputDir + r'\activePertypeDistbn.csv')
 
 t14 = time.time()
@@ -1324,6 +1342,7 @@ worker_table = addmargins(worker_table)
 
 ## reshape data in required form for visualizer
 ptype_map[4] = 'Non-Worker'
+ptype_map[5] = 'Driv Student'
 ptype_map[7] = 'Non-DrivStudent'
 ptype_map[8] = 'Pre-Schooler'
 ptype_map['Total'] = 'Total'
