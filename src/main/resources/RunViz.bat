@@ -51,6 +51,17 @@ SET R_SCRIPT=%WORKING_DIR%dependencies\R-3.4.1\bin\Rscript
 SET R_LIBRARY=%WORKING_DIR%dependencies\R-3.4.1\library
 SET RSTUDIO_PANDOC=%WORKING_DIR%dependencies\Pandoc
 
+:: Creating virtual Python environment
+set PYTHON_ENV=C:\ProgramData\Anaconda3
+call %PYTHON_ENV%\Scripts\activate.bat %PYTHON_ENV%
+call conda env list | find /i "viz"
+if not errorlevel 1 (
+	call conda env update --name viz --file %WORKING_DIR%environment.yaml
+) else (
+	call conda env create -f %WORKING_DIR%environment.yaml
+)
+call activate viz
+
 :: Extract Dependencies.zip
 IF NOT EXIST %WORKING_DIR%dependencies unzip %WORKING_DIR%dependencies.zip -d %WORKING_DIR%
 
@@ -67,7 +78,8 @@ ECHO SkimDir,%ABMOutputDir% >> %INPUT_FILE_ABM%
 ECHO MAX_ITER,%MAX_ITER% >> %INPUT_FILE_ABM%
 :: Call R script to summarize BUILD outputs
 ECHO %startTime%%Time%: Running R script to summarize BUILD outputs...
-%R_SCRIPT% %WORKING_DIR%scripts\SummarizeABM2016.R %INPUT_FILE_ABM%
+call python %WORKING_DIR%scripts\SummarizeABM2016.py %INPUT_FILE_ABM%
+::%R_SCRIPT% %WORKING_DIR%scripts\SummarizeABM2016.R %INPUT_FILE_ABM%
 
 :: Summarize REF
 SET WD=%BASE_SUMMARY_DIR%
@@ -124,3 +136,8 @@ IF %ERRORLEVEL% EQU 11 (
    EXIT /b %errorlevel%
 )
 ECHO %startTime%%Time%: Dashboard creation complete...
+
+conda deactivate
+conda deactivate
+
+pause
