@@ -1,10 +1,12 @@
 from __future__ import division
 import os
+import sys
 import pandas as pd
 import numpy as np
-import openmatrix as omx
 import threading
 import time
+#import openmatrix as omx
+
 
 class TableReader(threading.Thread):
     '''
@@ -35,7 +37,11 @@ def pivot(df, row, col, val = None, f = sum):
         return df[[row, col, val]].groupby([row, col]).f()[val].reset_index().pivot(row, col, val).fillna(0)
 
 def count(df, cols):
-    return df[cols].value_counts().sort_index().reset_index().rename(columns = {0: 'freq'})
+    try:
+        return df[cols].value_counts().sort_index().reset_index().rename(columns = {0: 'freq'})
+    except AttributeError:
+        df[0] = np.ones_like(df.index)
+        return df[cols + [0]].groupby(cols).count()[0].sort_index()#.reset_index().rename(columns = {'one': 'freq'})
 
 def addmargins(df, name = 'Total'):
     for i in range(2):
@@ -77,11 +83,12 @@ def get_flow_by_mode(df, mode, o, d, num):
         flow.index.name = o
         flow.columns.name = d
         flow += pd.crosstab(mode_trips[o], mode_trips[d], mode_trips[num], aggfunc = sum)
-        flow = pd.melt(flow.fillna(0).reset_index(), [o], value_name = 'Freq')
+        flow[o] = flow.index
+        flow = pd.melt(flow.fillna(0), [o], value_name = 'Freq')
         flow[mode] = i*np.ones_like(flow.index)
         grouped = pd.concat([grouped, flow[grouped.columns]])
 
-    grouped = grouped.sort_values([d, o, mode]).reset_index()
+    grouped = grouped.sort([d, o, mode]).reset_index()
     del grouped['index']
     grouped = grouped.reset_index()
     grouped['index'] += 1
@@ -96,24 +103,37 @@ def add_empty_bins(df):
             df.loc[i] = np.zeros_like(df.columns)
     return df.sort_index()
 
-ABMOutputDir = r'C:\test\visualizer_conversion\output' #Copied from T:\ABM\ABM_FY19\model_runs\ABM2Plus\v1221\2016_1422new_sxu\output
-geogXWalkDir = os.path.split(ABMOutputDir)[0]
-SkimDir = r'T:\ABM\ABM_FY19\model_runs\ABM2Plus\v1221\2016_1422new_sxu\output'
-vizOutputDir = r'C:\test\visualizer_conversion\visualizer\outputs\summaries\BUILD'#os.path.split(ABMOutputDir)[0] + r'\visualizer\outputs\summaries\BUILD'
+#ABMOutputDir = r'C:\test\visualizer_conversion\output' #Copied from T:\ABM\ABM_FY19\model_runs\ABM2Plus\v1221\2016_1422new_sxu\output
+#geogXWalkDir = os.path.split(ABMOutputDir)[0]
+#SkimDir = r'T:\ABM\ABM_FY19\model_runs\ABM2Plus\v1221\2016_1422new_sxu\output'
+#WD = r'C:\test\visualizer_conversion\visualizer\outputs\summaries\BUILD'#os.path.split(ABMOutputDir)[0] + r'\visualizer\outputs\summaries\BUILD'
 
-input_files = {'hh':                    ABMOutputDir + r'\householdData_3.csv', #Replace 3 with MAX_ITER (once I find out how MAX_ITER is defined...)
-               'per':                   ABMOutputDir + r'\personData_3.csv',
-               'tours':                 ABMOutputDir + r'\indivTourData_3.csv',
-               'trips':                 ABMOutputDir + r'\indivTripData_3.csv',
-               'jtrips':                ABMOutputDir + r'\jointTripData_3.csv',
-               'unique_joint_tours':    ABMOutputDir + r'\jointTourData_3.csv',
-               'wsLoc':                 ABMOutputDir + r'\wsLocResults_3.csv',
+input_file = sys.argv[1]
+inputs = pd.read_csv(input_file, index_col = 0)['Value ']
+WD = inputs['WD'][:-1]
+ABMOutputDir = inputs['ABMOutputDir'][:-1]
+geogXWalkDir = inputs['geogXWalkDir'][:-1]
+SkimDir = inputs['SkimDir'][:-1]
+MAX_ITER = inputs['MAX_ITER'][:-1]
+
+try:
+    os.mkdir(WD)
+except WindowsError:
+    pass
+
+input_files = {'hh':                    ABMOutputDir + r'\householdData_{}.csv'.format(MAX_ITER),
+               'per':                   ABMOutputDir + r'\personData_{}.csv'.format(MAX_ITER),
+               'tours':                 ABMOutputDir + r'\indivTourData_{}.csv'.format(MAX_ITER),
+               'trips':                 ABMOutputDir + r'\indivTripData_{}.csv'.format(MAX_ITER),
+               'jtrips':                ABMOutputDir + r'\jointTripData_{}.csv'.format(MAX_ITER),
+               'unique_joint_tours':    ABMOutputDir + r'\jointTourData_{}.csv'.format(MAX_ITER),
+               'wsLoc':                 ABMOutputDir + r'\wsLocResults_{}.csv'.format(MAX_ITER),
                'aoResults':             ABMOutputDir + r'\aoResults.csv',
                'aoResults_Pre':         ABMOutputDir + r'\aoResults_Pre.csv',
                'visitor_trips':         ABMOutputDir + r'\visitorTrips.csv',
-               'mazCorrespondence':     geogXWalkDir + r'\visualizer\data\geographicXwalk_PMSA.csv'
+               'mazCorrespondence':     geogXWalkDir + r'\geographicXwalk_PMSA.csv'
                }
-skim_file = SkimDir + r'\traffic_skims_MD.omx'
+skim_file = SkimDir + r'\MD_SOV_TR_H_DIST.csv'
 
 purpose_map = {'Work': 1,
                'University': 2,
@@ -208,11 +228,12 @@ t1 = time.time()
 print(t1 - t0)
 
 print('Reading Skims')
-skim = omx.open_file(skim_file, 'r')
-skimLookup = pd.Series(skim.mapping('zone_number')).sort_values()
-N = len(skimLookup)
+skim = pd.read_csv(skim_file, index_col = 0)
+N = skim.shape[0]
+skimLookup = pd.Series(range(N), skim.index)
+#N = len(skimLookup)
 #DST_SKM = np.concatenate((np.reshape(skim['MD_SOV_TR_H_DIST'], N**2), [-1]))
-DST_SKM = np.reshape(skim['MD_SOV_TR_H_DIST'], N**2)
+DST_SKM = np.concatenate((np.reshape(skim.values, N**2), [-1]))
 
 t2 = time.time()
 print(t2 - t1)
@@ -272,22 +293,22 @@ t3 = time.time()
 print(t3 - t2)
 
 print('Computing Summary Statistics')
-tables['aoResults_Pre'][['HHVEH', 'HHID']].groupby('HHVEH').count()['HHID'].reset_index().to_csv(vizOutputDir + r'\autoOwnership_Pre.csv')
-tables['aoResults'][['HHVEH', 'HHID']].groupby('HHVEH').count()['HHID'].reset_index().to_csv(vizOutputDir + r'\autoOwnership.csv')
-tables['hh'][['AVs', 'hh_id']].groupby('AVs').count()['hh_id'].reset_index().to_csv(vizOutputDir + r'\autoOwnership_AV.csv')
-tables['hh'][['VEH_NEWCAT', 'hh_id']].groupby('VEH_NEWCAT').count()['hh_id'].reset_index().to_csv(vizOutputDir + r'\autoOwnership_new.csv')
+tables['aoResults_Pre'][['HHVEH', 'HHID']].groupby('HHVEH').count()['HHID'].reset_index().to_csv(WD + r'\autoOwnership_Pre.csv')
+tables['aoResults'][['HHVEH', 'HHID']].groupby('HHVEH').count()['HHID'].reset_index().to_csv(WD + r'\autoOwnership.csv')
+tables['hh'][['AVs', 'hh_id']].groupby('AVs').count()['hh_id'].reset_index().to_csv(WD + r'\autoOwnership_AV.csv')
+tables['hh'][['VEH_NEWCAT', 'hh_id']].groupby('VEH_NEWCAT').count()['hh_id'].reset_index().to_csv(WD + r'\autoOwnership_new.csv')
 
 # Zero auto HHs by TAZ
 tables['hh']['HHTAZ'] = tables['hh']['home_mgra'].map(tables['mazCorrespondence']['taz'])
 tables['hh']['ZeroAutoWGT'] = np.where(tables['hh']['HHVEH'] == 0, 1, 0)
 tables['hh']['ZeroAutoWGT'] = tables['hh']['ZeroAutoWGT'].fillna(0)
-tables['hh'][['HHTAZ', 'ZeroAutoWGT']].groupby('HHTAZ').sum()['ZeroAutoWGT'].reset_index().to_csv(vizOutputDir + r'\zeroAutoByTaz.csv')
+tables['hh'][['HHTAZ', 'ZeroAutoWGT']].groupby('HHTAZ').sum()['ZeroAutoWGT'].reset_index().to_csv(WD + r'\zeroAutoByTaz.csv')
 
 pertypeDistbn = pd.DataFrame({'freq': tables['per']['PERTYPE'].value_counts().sort_index()})#.reset_index()
 pertypeDistbn.index.name = 'PERTYPE'
-pertypeDistbn.reset_index().to_csv(vizOutputDir + r'\pertypeDistbn.csv')
-tables['per'][['tele_choice', 'person_id']].groupby('tele_choice').count()['person_id'].reset_index().to_csv(vizOutputDir + r'\teleCommute_frequency.csv')
-tables['hh'][['transponder', 'hh_id']].groupby('transponder').count()['hh_id'].reset_index().to_csv(vizOutputDir + r'\transponder_ownership.csv')
+pertypeDistbn.reset_index().to_csv(WD + r'\pertypeDistbn.csv')
+tables['per'][['tele_choice', 'person_id']].groupby('tele_choice').count()['person_id'].reset_index().to_csv(WD + r'\teleCommute_frequency.csv')
+tables['hh'][['transponder', 'hh_id']].groupby('transponder').count()['hh_id'].reset_index().to_csv(WD + r'\transponder_ownership.csv')
 
 # Micro-mobility
 micro_r1 = tables['trips']['micro_walkMode'].reset_index().groupby('micro_walkMode').count()['index']
@@ -300,7 +321,7 @@ micro_v3 = tables['visitor_trips']['micro_trnEgr'].reset_index().groupby('micro_
 
 micromobility_summary = micro_r1 + micro_r2 + micro_r3 + micro_v1 + micro_v2 + micro_v3
 micromobility_summary.index.name = 'micro_mode'
-pd.DataFrame({'trips': micromobility_summary}).reset_index().to_csv(vizOutputDir + r'\micormobility.csv')
+pd.DataFrame({'trips': micromobility_summary}).reset_index().to_csv(WD + r'\micormobility.csv')
 
 # Mandatory DC
 workers = tables['wsLoc'].query('WorkLocation > 0 and WorkLocation != 99999').dropna(subset = ['WorkLocationDistance'])
@@ -325,9 +346,9 @@ for tlfd in [tlfd_work, tlfd_univ, tlfd_schl]:
         del tlfd[i]
     tlfd['Total'] = tlfd.sum(1)
 
-add_empty_bins(tlfd_work).to_csv(vizOutputDir + r'\workTLFD.csv')
-add_empty_bins(tlfd_univ).to_csv(vizOutputDir + r'\univTLFD.csv')
-add_empty_bins(tlfd_schl).to_csv(vizOutputDir + r'\schlTLFD.csv')
+add_empty_bins(tlfd_work).to_csv(WD + r'\workTLFD.csv')
+add_empty_bins(tlfd_univ).to_csv(WD + r'\univTLFD.csv')
+add_empty_bins(tlfd_schl).to_csv(WD + r'\schlTLFD.csv')
 
 # Output avg trip lengths for visualizer
 workTripLengths = workers[['HDISTRICT', 'WorkLocationDistance']].groupby('HDISTRICT').sum()['WorkLocationDistance'] / workers[['HDISTRICT', 'WorkLocationDistance']].groupby('HDISTRICT').count()['WorkLocationDistance']
@@ -340,7 +361,7 @@ univTripLengths.loc['Total'] = univ['SchoolLocationDistance'].sum() / univ.shape
 schlTripLengths = schl[['HDISTRICT', 'SchoolLocationDistance']].groupby('HDISTRICT').sum()['SchoolLocationDistance'] / schl[['HDISTRICT', 'SchoolLocationDistance']].groupby('HDISTRICT').count()['SchoolLocationDistance']
 schlTripLengths.loc['Total'] = schl['SchoolLocationDistance'].sum() / schl.shape[0]
 
-pd.DataFrame({'Work': workTripLengths, 'Univ': univTripLengths, 'Schl': schlTripLengths}).to_csv(vizOutputDir + r'\mandTripLengths.csv')
+pd.DataFrame({'Work': workTripLengths, 'Univ': univTripLengths, 'Schl': schlTripLengths}).to_csv(WD + r'\mandTripLengths.csv')
 
 # Work from home [for each district and total]
 districtWorkers = tables['wsLoc'][['WorkLocation', 'HDISTRICT']].query('WorkLocation > 0').groupby('HDISTRICT').count()['WorkLocation']
@@ -348,10 +369,10 @@ districtWfh = tables['wsLoc'][['WorkLocation', 'HDISTRICT']].query('WorkLocation
 wfh_summary = pd.DataFrame({'Workers': districtWorkers, 'WFH': districtWfh})
 wfh_summary.index.name = 'District'
 wfh_summary.loc['Total'] = wfh_summary.sum(0)
-wfh_summary.to_csv(vizOutputDir + r'\wfh_summary.csv')
+wfh_summary.to_csv(WD + r'\wfh_summary.csv')
 totalwfh = pd.DataFrame(wfh_summary.loc['Total']).T
 totalwfh.index.name = 'District'
-totalwfh.to_csv(vizOutputDir + r'\wfh_summary_region.csv')
+totalwfh.to_csv(WD + r'\wfh_summary_region.csv')
 
 #County-County Flows
 #JJF: Don't we only have one county? :)
@@ -369,7 +390,7 @@ for i in range(2): #Rename the columns, then flip and rename the rows, then flip
     countyFlows = countyFlows.T
 countyFlows.index.name = None
 countyFlows.columns.name = None
-countyFlows.to_csv(vizOutputDir + r'\countyFlows.csv')
+countyFlows.to_csv(WD + r'\countyFlows.csv')
 
 t4 = time.time()
 print(t4 - t3)
@@ -444,7 +465,7 @@ temp_tour['STOP_FREQ_ALT'] = 4*np.minimum(temp_tour['num_ob_stops'], 3) + np.min
 stopFreqModel_summary = pivot(temp_tour, 'STOP_FREQ_ALT', 'TOURPURP')
 stopFreqModel_summary.index.name = None
 stopFreqModel_summary.columns.name = None
-stopFreqModel_summary.to_csv(vizOutputDir + r'\stopFreqModel_summary.csv')
+stopFreqModel_summary.to_csv(WD + r'\stopFreqModel_summary.csv')
 
 # ------
 
@@ -547,9 +568,9 @@ print('Calculating Tour Rates')
 #workCounts = tables['tours'].reset_index()[['hh_id', 'person_num', 'TOURPURP', 'index']].query('TOURPURP == 1').groupby(['hh_id', 'person_num']).count()['index']
 #schlCounts = tables['tours'].reset_index()[['hh_id', 'person_num', 'TOURPURP', 'index']].query('TOURPURP == 2 or TOURPURP == 3').groupby(['hh_id', 'person_num']).count()['index']
 #inmCounts = tables['tours'].reset_index()[['hh_id', 'person_num', 'TOURPURP', 'index']].query('TOURPURP >= 4 and TOURPURP <= 9').groupby(['hh_id', 'person_num']).count()['index']
-workCounts = tables['tours'].query('TOURPURP == 1')[['hh_id', 'person_num']].value_counts().sort_index()
-schlCounts = tables['tours'].query('TOURPURP == 2 or TOURPURP == 3')[['hh_id', 'person_num']].value_counts().sort_index()
-inmCounts = tables['tours'].query('TOURPURP >= 4 and TOURPURP <= 9')[['hh_id', 'person_num']].value_counts().sort_index()
+workCounts = count(tables['tours'].query('TOURPURP == 1'), ['hh_id', 'person_num'])
+schlCounts = count(tables['tours'].query('TOURPURP == 2 or TOURPURP == 3'), ['hh_id', 'person_num'])
+inmCounts = count(tables['tours'].query('TOURPURP >= 4 and TOURPURP <= 9'), ['hh_id', 'person_num'])
 
 #Individual NM tour generation
 workCounts_temp = workCounts.copy()
@@ -557,14 +578,14 @@ schlCounts_temp = schlCounts.copy()
 #inmCounts_temp = tables['tours'].reset_index()[['hh_id', 'person_num', 'TOURPURP', 'index']].query('TOURPURP > 4 and TOURPURP <= 9').groupby(['hh_id', 'person_num']).count()['index'].reset_index()
 #atWorkCounts_temp = tables['tours'].reset_index()[['hh_id', 'person_num', 'TOURPURP', 'index']].query('TOURPURP == 10').groupby(['hh_id', 'person_num']).count()['index'].reset_index()
 #escortCounts_temp = tables['tours'].reset_index()[['hh_id', 'person_num', 'TOURPURP', 'index']].query('TOURPURP == 4').groupby(['hh_id', 'person_num']).count()['index'].reset_index()
-inmCounts_temp = tables['tours'].query('TOURPURP > 4 and TOURPURP <= 9')[['hh_id', 'person_num']].value_counts().sort_index()
-atWorkCounts_temp = tables['tours'].query('TOURPURP == 10')[['hh_id', 'person_num']].value_counts().sort_index()
-escortCounts_temp = tables['tours'].query('TOURPURP == 4')[['hh_id', 'person_num']].value_counts().sort_index()
+inmCounts_temp = count(tables['tours'].query('TOURPURP > 4 and TOURPURP <= 9'), ['hh_id', 'person_num'])
+atWorkCounts_temp = count(tables['tours'].query('TOURPURP == 10'), ['hh_id', 'person_num'])
+escortCounts_temp = count(tables['tours'].query('TOURPURP == 4'), ['hh_id', 'person_num'])
 
-temp = pd.DataFrame({'freq_work': workCounts_temp, 'freq_schl': schlCounts_temp}).fillna(0)
+temp = pd.DataFrame({'freq_work': workCounts_temp, 'freq_schl': schlCounts_temp}).fillna(0).reset_index()
 #temp1 = temp.copy()
 #temp1['freq_inm'] = inmCounts_temp
-temp1 = temp.merge(pd.DataFrame({'freq_inm': inmCounts_temp}).reset_index(), how = 'outer', on = ['hh_id', 'person_num']).fillna(0).sort_values(['hh_id', 'person_num'])
+temp1 = temp.merge(pd.DataFrame({'freq_inm': inmCounts_temp}).reset_index(), how = 'outer', on = ['hh_id', 'person_num']).fillna(0).sort(['hh_id', 'person_num'])
 temp1['freq_m'] = temp1['freq_work'] + temp1['freq_schl']
 temp1['freq_itours'] = temp1['freq_m'] + temp1['freq_inm']
 
@@ -575,7 +596,7 @@ temp_joint['person_num'] = temp_joint['person_num'].astype(int)
 temp_joint['joint'] = np.where(temp_joint['person_num'] > 0, 1, 0)
 
 temp_joint = temp_joint.query('joint == 1')
-person_unique_joint = temp_joint.groupby(['hh_id', 'person_num']).sum()
+person_unique_joint = temp_joint.groupby(['hh_id', 'person_num']).sum().reset_index()
 
 temp2 = temp1.merge(person_unique_joint, how = 'outer', on = ['hh_id', 'person_num'])
 temp2 = temp2.merge(pd.DataFrame({'freq_atwork': atWorkCounts_temp}).reset_index(), how = 'outer', on = ['hh_id', 'person_num'])
@@ -595,13 +616,13 @@ temp2['total_tours'] = temp2['freq_nm'] + temp2['freq_m'] + temp2['freq_atwork']
 persons_mand = temp2.query('freq_m > 0') #persons with at least 1 mandatory tour
 persons_nomand = temp2.query('freq_m == 0') #active persons with no mandatory tours
 
-freq_nmtours_mand = pd.DataFrame({'freq': persons_mand[['PERTYPE', 'freq_nm']].value_counts()}).sort_index().reset_index()
-freq_nmtours_nomand = pd.DataFrame({'freq': persons_nomand[['PERTYPE', 'freq_nm']].value_counts()}).sort_index().reset_index()
-test = temp2[['PERTYPE', 'freq_inm', 'freq_m', 'freq_nm', 'freq_atwork', 'freq_escort']].value_counts().sort_index()
+freq_nmtours_mand = pd.DataFrame({'freq': count(persons_mand, ['PERTYPE', 'freq_nm'])}).sort_index().reset_index()
+freq_nmtours_nomand = pd.DataFrame({'freq': count(persons_nomand, ['PERTYPE', 'freq_nm'])}).sort_index().reset_index()
+test = count(temp2, ['PERTYPE', 'freq_inm', 'freq_m', 'freq_nm', 'freq_atwork', 'freq_escort'])
 
-test.to_csv(vizOutputDir + r'\tour_rate_debug.csv')
+test.to_csv(WD + r'\tour_rate_debug.csv')
 del temp2['joint']
-temp2.to_csv(vizOutputDir + r'\temp2.csv')
+temp2.to_csv(WD + r'\temp2.csv')
 
 def write_table(df):
     text = str(df).replace(' ', ',')
@@ -615,18 +636,18 @@ def write_table(df):
     else:
         return '\n'.join(lines)
 
-fp = vizOutputDir + r'\indivNMTourFreq.csv'
+fp = WD + r'\indivNMTourFreq.csv'
 with open(fp, 'w') as f:
     f.write('x\nNon-Mandatory Tours for Persons with at-least 1 Mandatory Tour\n' + write_table(freq_nmtours_mand) + '\nx\nNon-Mandatory Tours for Active Persons with 0 Mandatory Tour\n' + write_table(freq_nmtours_nomand))
     f.close()
 
-i4tourCounts = tables['tours'].query('TOURPURP == 4')[['hh_id', 'person_num']].value_counts()
-i5tourCounts = tables['tours'].query('TOURPURP == 5')[['hh_id', 'person_num']].value_counts()
-i6tourCounts = tables['tours'].query('TOURPURP == 6')[['hh_id', 'person_num']].value_counts()
-i7tourCounts = tables['tours'].query('TOURPURP == 7')[['hh_id', 'person_num']].value_counts()
-i8tourCounts = tables['tours'].query('TOURPURP == 8')[['hh_id', 'person_num']].value_counts()
-i9tourCounts = tables['tours'].query('TOURPURP == 9')[['hh_id', 'person_num']].value_counts()
-tourCounts = tables['tours'].query('TOURPURP <= 9')[['hh_id', 'person_num']].value_counts()
+i4tourCounts = count(tables['tours'].query('TOURPURP == 4'), ['hh_id', 'person_num'])
+i5tourCounts = count(tables['tours'].query('TOURPURP == 5'), ['hh_id', 'person_num'])
+i6tourCounts = count(tables['tours'].query('TOURPURP == 6'), ['hh_id', 'person_num'])
+i7tourCounts = count(tables['tours'].query('TOURPURP == 7'), ['hh_id', 'person_num'])
+i8tourCounts = count(tables['tours'].query('TOURPURP == 8'), ['hh_id', 'person_num'])
+i9tourCounts = count(tables['tours'].query('TOURPURP == 9'), ['hh_id', 'person_num'])
+tourCounts = count(tables['tours'].query('TOURPURP <= 9'), ['hh_id', 'person_num'])
 #dfs = [i4tourCounts, i5tourCounts, i6tourCounts, i7tourCounts, i8tourCounts, i9tourCounts, workCounts, schlCounts, inmCounts, tourCounts]
 
 def counts2df(series):
@@ -711,7 +732,7 @@ tables['per']['i9numTours'] = tables['per']['lookup'].map(i9tourCounts['freq']).
 # Total tours by person type
 tables['per']['numTours'] = tables['per']['numTours'].fillna(0)
 toursPertypeDistbn = pd.DataFrame({'freq': tables['tours'].query('PERTYPE > 0 and TOURPURP != 10')['PERTYPE'].value_counts().sort_index()})
-toursPertypeDistbn.reset_index().to_csv(vizOutputDir + r'\toursPertypeDistbn.csv')
+toursPertypeDistbn.reset_index().to_csv(WD + r'\toursPertypeDistbn.csv')
 
 # count joint tour fr each person type
 temp_joint = pd.melt(tables['unique_joint_tours'], ['hh_id', 'tour_id'], ['PTYPE1', 'PTYPE2', 'PTYPE3', 'PTYPE4', 'PTYPE5', 'PTYPE6', 'PTYPE7', 'PTYPE8'], value_name = 'PERTYPE')
@@ -724,11 +745,11 @@ jtoursPertypeDistbn = pd.DataFrame({'freq': temp_joint['PERTYPE'].astype(int).va
 # Total tours by person type for visualizer
 totaltoursPertypeDistbn = toursPertypeDistbn.copy()
 totaltoursPertypeDistbn['freq'] += jtoursPertypeDistbn['freq']
-totaltoursPertypeDistbn.to_csv(vizOutputDir + r'\total_tours_by_pertype_vis.csv', index = False)
+totaltoursPertypeDistbn.to_csv(WD + r'\total_tours_by_pertype_vis.csv', index = False)
 
 # Total inidi NM tours by person type and purpose
-tours_pertype_purpose = pd.DataFrame({'freq': tables['tours'].query('TOURPURP >= 4 and TOURPURP <= 9')[['PERTYPE', 'TOURPURP']].value_counts().sort_index()}).reset_index()
-tours_pertype_purpose.to_csv(vizOutputDir + r'\tours_pertype_purpose.csv', index = False)
+tours_pertype_purpose = pd.DataFrame({'freq': count(tables['tours'].query('TOURPURP >= 4 and TOURPURP <= 9'), ['PERTYPE', 'TOURPURP'])}).reset_index()
+tours_pertype_purpose.to_csv(WD + r'\tours_pertype_purpose.csv', index = False)
 
 # code indi NM tour category
 for i in range(4, 10):
@@ -737,12 +758,12 @@ for i in range(4, 10):
     else:
         tables['per']['i%dnumTours'%(i)] = np.minimum(tables['per']['i%dnumTours'%(i)], 2)
 
-tours_pertype_esco = tables['per'][['PERTYPE', 'i4numTours']].value_counts().sort_index().reset_index()
-tours_pertype_shop = tables['per'][['PERTYPE', 'i5numTours']].value_counts().sort_index().reset_index()
-tours_pertype_main = tables['per'][['PERTYPE', 'i6numTours']].value_counts().sort_index().reset_index()
-tours_pertype_eati = tables['per'][['PERTYPE', 'i7numTours']].value_counts().sort_index().reset_index()
-tours_pertype_visi = tables['per'][['PERTYPE', 'i8numTours']].value_counts().sort_index().reset_index()
-tours_pertype_disc = tables['per'][['PERTYPE', 'i9numTours']].value_counts().sort_index().reset_index()
+tours_pertype_esco = count(tables['per'], ['PERTYPE', 'i4numTours']).reset_index()
+tours_pertype_shop = count(tables['per'], ['PERTYPE', 'i5numTours']).reset_index()
+tours_pertype_main = count(tables['per'], ['PERTYPE', 'i6numTours']).reset_index()
+tours_pertype_eati = count(tables['per'], ['PERTYPE', 'i7numTours']).reset_index()
+tours_pertype_visi = count(tables['per'], ['PERTYPE', 'i8numTours']).reset_index()
+tours_pertype_disc = count(tables['per'], ['PERTYPE', 'i9numTours']).reset_index()
 
 tours_pertype_esco.rename(columns = {'i4numTours': 'inumTours', 0: 'freq'}, inplace = True)
 tours_pertype_shop.rename(columns = {'i5numTours': 'inumTours', 0: 'freq'}, inplace = True)
@@ -759,7 +780,7 @@ tours_pertype_visi['purpose'] = 8*np.ones_like(tours_pertype_visi.index)
 tours_pertype_disc['purpose'] = 9*np.ones_like(tours_pertype_disc.index)
 
 indi_nm_tours_pertype = pd.concat((tours_pertype_esco, tours_pertype_shop, tours_pertype_main, tours_pertype_eati, tours_pertype_visi, tours_pertype_disc))
-indi_nm_tours_pertype.to_csv(vizOutputDir + r'\inmtours_pertype_purpose.csv', index = False)
+indi_nm_tours_pertype.to_csv(WD + r'\inmtours_pertype_purpose.csv', index = False)
 
 tours_pertype_purpose = tours_pertype_purpose.pivot('PERTYPE', 'TOURPURP', 'freq').fillna(0)
 
@@ -772,19 +793,19 @@ nm_tour_rates.loc['All'] = nm_tour_rates.sum(0)
 for col in nm_tour_rates.columns:
     nm_tour_rates[col] /= pertypeDF['freq']
 nm_tour_rates['All'] = nm_tour_rates.sum(1)
-nm_tour_rates = nm_tour_rates.reset_index()
+nm_tour_rates['PERTYPE'] = nm_tour_rates.index
 nm_tour_rates = pd.melt(nm_tour_rates, ['PERTYPE'], value_name =  'tour_rate')
 nm_tour_rates = nm_tour_rates.rename(columns = {'TOURPURP': 'tour_purp'})
 ptype_map['All'] = 'All'
 purpid2name['All'] = 'All'
 nm_tour_rates['PERTYPE'] = nm_tour_rates['PERTYPE'].map(ptype_map)
 nm_tour_rates['tour_purp'] = nm_tour_rates['tour_purp'].map(purpid2name)
-nm_tour_rates.to_csv(vizOutputDir + r'\nm_tour_rates.csv', index = False)
+nm_tour_rates.to_csv(WD + r'\nm_tour_rates.csv', index = False)
 
 t1 = tables['tours'].query('TOURPURP < 10')['TOURPURP'].value_counts().sort_index()
 t3 = tables['unique_joint_tours']['JOINT_PURP'].value_counts().sort_index()
 tours_purpose_type = pd.DataFrame({'indi': t1, 'joint': t3}).fillna(0)
-tours_purpose_type.to_csv(vizOutputDir + r'\tours_purpose_type.csv')
+tours_purpose_type.to_csv(WD + r'\tours_purpose_type.csv')
 
 t7 = time.time()
 print(t7 - t6)
@@ -795,56 +816,59 @@ tables['per']['activity_pattern'] = np.where((tables['per']['activity_pattern'] 
                                              np.where(tables['per']['inmf_choice'] > 0, 'N', 'H'),
                                              tables['per']['activity_pattern'])
 #dapSummary = tables['per'][['PERTYPE', 'activity_pattern']].value_counts().sort_index().reset_index().rename(columns = {0: 'freq'})
-dapSummary = count(tables['per'], ['PERTYPE', 'activity_pattern'])
-dapSummary.to_csv(vizOutputDir + r'\dapSummary.csv')
+dapSummary = count(tables['per'], ['PERTYPE', 'activity_pattern']).reset_index().rename(columns = {0: 'freq'})
+dapSummary.to_csv(WD + r'\dapSummary.csv')
 
 dapSummary_vis = dapSummary.pivot('PERTYPE', 'activity_pattern', 'freq').fillna(0)
 dapSummary_vis.loc['Total'] = dapSummary_vis.sum(0)
-dapSummary_vis = pd.melt(dapSummary_vis.reset_index(), id_vars = ['PERTYPE'], value_name = 'freq').rename(columns = {'activity_pattern': 'DAP'})
-dapSummary_vis.to_csv(vizOutputDir + r'\dapSummary_vis.csv')
+dapSummary_vis['PERTYPE'] = dapSummary_vis.index
+dapSummary_vis = pd.melt(dapSummary_vis, id_vars = ['PERTYPE'], value_name = 'freq').rename(columns = {'activity_pattern': 'DAP'})
+dapSummary_vis.to_csv(WD + r'\dapSummary_vis.csv')
 
 #hhsizeJoint = tables['hh'].query('HHSIZE >= 2')[['HHSIZE', 'JOINT']].value_counts().sort_index().reset_index().rename(columns = {0: 'freq'})
-hhsizeJoint = count(tables['hh'].query('HHSIZE >= 2'), ['HHSIZE', 'JOINT'])
-hhsizeJoint.to_csv(vizOutputDir + r'\hhsizeJoint.csv')
+hhsizeJoint = count(tables['hh'].query('HHSIZE >= 2'), ['HHSIZE', 'JOINT']).reset_index().rename(columns = {0: 'freq'})
+hhsizeJoint.to_csv(WD + r'\hhsizeJoint.csv')
 
 #mtfSummary = tables['per'].query('imf_choice > 0')[['PERTYPE', 'imf_choice']].value_counts().sort_index().reset_index().rename(columns = {0: 'freq'})
-mtfSummary = count(tables['per'].query('imf_choice > 0'), ['PERTYPE', 'imf_choice'])
-mtfSummary.to_csv(vizOutputDir + r'\mtfSummary.csv')
+mtfSummary = count(tables['per'].query('imf_choice > 0'), ['PERTYPE', 'imf_choice']).reset_index().rename(columns = {0: 'freq'})
+mtfSummary.to_csv(WD + r'\mtfSummary.csv')
 
 mtfSummary_vis = mtfSummary.pivot('PERTYPE', 'imf_choice', 'freq').fillna(0)
 mtfSummary_vis.loc['Total'] = mtfSummary_vis.sum(0)
-mtfSummary_vis = pd.melt(mtfSummary_vis.reset_index(), id_vars = ['PERTYPE'], value_name = 'freq').rename(columns = {'imf_choice': 'MTF'})
-mtfSummary_vis.to_csv(vizOutputDir + r'\mtfSummary_vis.csv')
+mtfSummary_vis['PERTYPE'] = mtfSummary_vis.index
+mtfSummary_vis = pd.melt(mtfSummary_vis, id_vars = ['PERTYPE'], value_name = 'freq').rename(columns = {'imf_choice': 'MTF'})
+mtfSummary_vis.to_csv(WD + r'\mtfSummary_vis.csv')
 
 inmSummary = pd.DataFrame({'PERTYPE': range(1, 9)})
 inmSummary['tour0'] = inmSummary['PERTYPE'].map(tables['per'].query('inmTours == 0')['PERTYPE'].value_counts())
 inmSummary['tour1'] = inmSummary['PERTYPE'].map(tables['per'].query('inmTours == 1')['PERTYPE'].value_counts())
 inmSummary['tour2'] = inmSummary['PERTYPE'].map(tables['per'].query('inmTours == 2')['PERTYPE'].value_counts())
 inmSummary['tour3pl'] = inmSummary['PERTYPE'].map(tables['per'].query('inmTours >= 3')['PERTYPE'].value_counts())
-inmSummary.to_csv(vizOutputDir + r'\innmSummary.csv')
+inmSummary.to_csv(WD + r'\innmSummary.csv')
 
 inmSummary_viz = inmSummary.set_index('PERTYPE').rename(columns = {'tour0': '0', 'tour1': '1', 'tour2': '2', 'tour3pl': '3pl'})
 inmSummary_viz.loc['Total'] = inmSummary_viz.sum(0)
-inmSummary_viz = pd.melt(inmSummary_viz.reset_index(), id_vars = ['PERTYPE'], var_name = 'nmtours', value_name = 'freq')
-inmSummary_viz.to_csv(vizOutputDir + r'\inmSummary_vis.csv')
+inmSummary_viz['PERTYPE'] = inmSummary_viz.index
+inmSummary_viz = pd.melt(inmSummary_viz, id_vars = ['PERTYPE'], var_name = 'nmtours', value_name = 'freq')
+inmSummary_viz.to_csv(WD + r'\inmSummary_vis.csv')
 
 #Joint Tour Frequency and composition
-jtfSummary = tables['hh'].dropna(subset = ['jtf'])['jtf'].value_counts().sort_index().reset_index().rename(columns = {'index': 'jtf', 'jtf': 'freq'})
-jointComp = tables['unique_joint_tours']['tour_composition'].value_counts().sort_index().reset_index().rename(columns = {'index': 'tour_composition', 'tour_composition': 'freq'})
-jointPartySize = tables['unique_joint_tours']['NUMBER_HH'].value_counts().sort_index().reset_index().rename(columns = {'index': 'NUMBER_HH', 'NUMBER_HH': 'freq'})
-jointCompPartySize = tables['unique_joint_tours'][['tour_composition', 'NUMBER_HH']].value_counts().sort_index().reset_index().rename(columns = {0: 'freq'})
+jtfSummary = tables['hh'].dropna(subset = ['jtf'])['jtf'].value_counts().sort_index().reset_index().rename(columns = {'jtf': 'freq', 0: 'freq'}).rename(columns = {'index': 'jtf'})
+jointComp = tables['unique_joint_tours']['tour_composition'].value_counts().sort_index().reset_index().rename(columns = {'tour_composition': 'freq', 0: 'freq'}).rename(columns = {'index': 'tour_composition'})
+jointPartySize = tables['unique_joint_tours']['NUMBER_HH'].value_counts().sort_index().reset_index().rename(columns = {'NUMBER_HH': 'freq', 0: 'freq'}).rename(columns = {'index': 'NUMBER_HH'})
+jointCompPartySize = count(tables['unique_joint_tours'], ['tour_composition', 'NUMBER_HH']).reset_index().rename(columns = {0: 'freq'})
 tables['hh']['jointCat'] = np.minimum(tables['hh']['jtours'], 2)
-jointToursHHSize = tables['hh'].dropna(subset = ['HHSIZE', 'jointCat'])[['HHSIZE', 'jointCat']].value_counts().sort_index().reset_index().rename(columns = {0: 'freq'})
+jointToursHHSize = count(tables['hh'].dropna(subset = ['HHSIZE', 'jointCat']), ['HHSIZE', 'jointCat']).reset_index().rename(columns = {0: 'freq'})
 
-jftSummary_file = vizOutputDir + r'\jtfSummary.csv'
-jtfSummary.to_csv(jftSummary_file)
-jointComp.to_csv(jftSummary_file, mode = 'a')
-jointPartySize.to_csv(jftSummary_file, mode = 'a')
-jointCompPartySize.to_csv(jftSummary_file, mode = 'a')
-jointToursHHSize.to_csv(jftSummary_file, mode = 'a')
+jtfSummary_file = WD + r'\jtfSummary.csv'
+jtfSummary.to_csv(jtfSummary_file)
+jointComp.to_csv(jtfSummary_file, mode = 'a')
+jointPartySize.to_csv(jtfSummary_file, mode = 'a')
+jointCompPartySize.to_csv(jtfSummary_file, mode = 'a')
+jointToursHHSize.to_csv(jtfSummary_file, mode = 'a')
 
 #cap joint party size to 5+
-jointPartySize = np.minimum(tables['unique_joint_tours']['NUMBER_HH'], 5).value_counts().sort_index().reset_index().rename(columns = {'index': 'NUMBER_HH', 'NUMBER_HH': 'freq'}).query('NUMBER_HH <= 5')
+jointPartySize = np.minimum(tables['unique_joint_tours']['NUMBER_HH'], 5).value_counts().sort_index().reset_index().rename(columns = {'NUMBER_HH': 'freq'}).rename(columns = {'index': 'NUMBER_HH'}).query('NUMBER_HH <= 5')
 
 jtf = pd.DataFrame({'jtf_code': range(1, 22),
                     'alt_name': ["No Joint Tours", "1 Shopping", "1 Maintenance", "1 Eating Out", "1 Visiting", "1 Other Discretionary",
@@ -860,8 +884,11 @@ jointComp['tour_composition'] = jointComp['tour_composition'].map(tour_comp_map)
 jointToursHHSizeProp = pd.crosstab(jointToursHHSize.query('HHSIZE > 1')['jointCat'],
                                    jointToursHHSize.query('HHSIZE > 1')['HHSIZE'],
                                    jointToursHHSize.query('HHSIZE > 1')['freq'], aggfunc = sum,
-                                   margins = True, margins_name = 'Total', normalize = 'columns').fillna(0)
-jointToursHHSizeProp = pd.melt((100*jointToursHHSizeProp).reset_index(), id_vars = ['jointCat'], value_name = 'freq').rename(columns = {'jointCat': 'jointTours', 'HHSIZE': 'hhsize'})
+                                   margins = True).fillna(0).rename(columns = {'All': 'Total'})
+for i in jointToursHHSizeProp.index:
+    jointToursHHSizeProp.loc[i] /= jointToursHHSizeProp.loc['All']
+jointToursHHSizeProp['jointCat'] = jointToursHHSizeProp.index
+jointToursHHSizeProp = pd.melt((100*jointToursHHSizeProp.drop('All')), id_vars = ['jointCat'], value_name = 'freq').rename(columns = {'jointCat': 'jointTours', 'HHSIZE': 'hhsize'})
 
 jointCompPartySize['tour_composition'] = jointCompPartySize['tour_composition'].map(tour_comp_map)
 
@@ -869,15 +896,18 @@ jointCompPartySize['tour_composition'] = jointCompPartySize['tour_composition'].
 jointCompPartySizeProp = pd.crosstab(jointCompPartySize['tour_composition'],
                                      np.minimum(jointCompPartySize['NUMBER_HH'], 5),
                                      jointCompPartySize['freq'],aggfunc = sum,
-                                     margins = True, margins_name = 'Total', normalize = 'index').fillna(0)
-jointCompPartySizeProp = pd.melt((100*jointCompPartySizeProp).reset_index(), id_vars = ['tour_composition'], value_name = 'freq').rename(columns = {'tour_composition': 'comp', 'NUMBER_HH': 'partysize'})
+                                     margins = True).fillna(0).rename(columns = {'All': 'Total'})
+for i in jointCompPartySizeProp.index:
+    jointCompPartySizeProp.loc[i] /= jointCompPartySizeProp.loc['All']
+jointCompPartySizeProp['tour_composition'] = jointCompPartySizeProp.index
+jointCompPartySizeProp = pd.melt((100*jointCompPartySizeProp.drop('All')), id_vars = ['tour_composition'], value_name = 'freq').rename(columns = {'tour_composition': 'comp', 'NUMBER_HH': 'partysize'})
 
 #jointCompPartySizeProp
-jtf.to_csv(vizOutputDir + r'\jtf.csv', index = False)
-jointComp.to_csv(vizOutputDir + r'\jointComp.csv', index = False)
-jointPartySize.to_csv(vizOutputDir + r'\JointPartySize.csv', index = False)
-jointCompPartySizeProp.to_csv(vizOutputDir + r'\JointCompPartySize.csv', index = False)
-jointToursHHSizeProp.to_csv(vizOutputDir + r'\JointToursHHSize.csv', index = False)
+jtf.to_csv(WD + r'\jtf.csv', index = False)
+jointComp.to_csv(WD + r'\jointComp.csv', index = False)
+jointPartySize.to_csv(WD + r'\JointPartySize.csv', index = False)
+jointCompPartySizeProp.to_csv(WD + r'\JointCompPartySize.csv', index = False)
+jointToursHHSizeProp.to_csv(WD + r'\JointToursHHSize.csv', index = False)
 
 t8 = time.time()
 print(t8 - t7)
@@ -896,7 +926,7 @@ todDepProfile['jmain'] = jtod[5] + jtod[6]
 todDepProfile['jdisc'] = jtod[7] + jtod[8] + jtod[9]
 todDepProfile['atwork'] = tod[10]
 todDepProfile['Total'] = todDepProfile.sum(1)
-todDepProfile.fillna(0).to_csv(vizOutputDir + r'\todDepProfile.csv')
+todDepProfile.fillna(0).to_csv(WD + r'\todDepProfile.csv')
 
 tod = pd.crosstab(tables['tours']['end_period'], tables['tours']['TOURPURP'])
 jtod = pd.crosstab(tables['unique_joint_tours']['end_period'], tables['unique_joint_tours']['JOINT_PURP'])
@@ -911,7 +941,7 @@ todArrProfile['jmain'] = jtod[5] + jtod[6]
 todArrProfile['jdisc'] = jtod[7] + jtod[8] + jtod[9]
 todArrProfile['atwork'] = tod[10]
 todArrProfile['Total'] = todArrProfile.sum(1)
-todArrProfile.fillna(0).to_csv(vizOutputDir + r'\todArrProfile.csv')
+todArrProfile.fillna(0).to_csv(WD + r'\todArrProfile.csv')
 
 tod = pd.crosstab(tables['tours']['tourdur'], tables['tours']['TOURPURP'])
 jtod = pd.crosstab(tables['unique_joint_tours']['tourdur'], tables['unique_joint_tours']['JOINT_PURP'])
@@ -926,7 +956,7 @@ todDurProfile['jmain'] = jtod[5] + jtod[6]
 todDurProfile['jdisc'] = jtod[7] + jtod[8] + jtod[9]
 todDurProfile['atwork'] = tod[10]
 todDurProfile['Total'] = todDurProfile.sum(1)
-todDurProfile.fillna(0).to_csv(vizOutputDir + r'\todDurProfile.csv')
+todDurProfile.fillna(0).to_csv(WD + r'\todDurProfile.csv')
 
 ##stops by direction, purpose and model tod
 def classify_tod(period):
@@ -946,29 +976,29 @@ tables['tours']['end_tod'] = tables['tours']['end_period'].apply(classify_tod)
 tables['unique_joint_tours']['start_tod'] = tables['unique_joint_tours']['start_period'].apply(classify_tod)
 tables['unique_joint_tours']['end_tod'] = tables['unique_joint_tours']['end_period'].apply(classify_tod)
 
-stops_ib_tod = tables['tours'][['num_ib_stops', 'tour_purpose', 'start_tod', 'end_tod']].groupby(['tour_purpose', 'start_tod', 'end_tod']).sum().reset_index().sort_values(['end_tod', 'start_tod', 'tour_purpose'])
-stops_ob_tod = tables['tours'][['num_ob_stops', 'tour_purpose', 'start_tod', 'end_tod']].groupby(['tour_purpose', 'start_tod', 'end_tod']).sum().reset_index().sort_values(['end_tod', 'start_tod', 'tour_purpose'])
-jstops_ib_tod = tables['unique_joint_tours'][['num_ib_stops', 'tour_purpose', 'start_tod', 'end_tod']].groupby(['tour_purpose', 'start_tod', 'end_tod']).sum().reset_index().sort_values(['end_tod', 'start_tod', 'tour_purpose'])
-jstops_ob_tod = tables['unique_joint_tours'][['num_ob_stops', 'tour_purpose', 'start_tod', 'end_tod']].groupby(['tour_purpose', 'start_tod', 'end_tod']).sum().reset_index().sort_values(['end_tod', 'start_tod', 'tour_purpose'])
+stops_ib_tod = tables['tours'][['num_ib_stops', 'tour_purpose', 'start_tod', 'end_tod']].groupby(['tour_purpose', 'start_tod', 'end_tod']).sum().reset_index().sort(['end_tod', 'start_tod', 'tour_purpose'])
+stops_ob_tod = tables['tours'][['num_ob_stops', 'tour_purpose', 'start_tod', 'end_tod']].groupby(['tour_purpose', 'start_tod', 'end_tod']).sum().reset_index().sort(['end_tod', 'start_tod', 'tour_purpose'])
+jstops_ib_tod = tables['unique_joint_tours'][['num_ib_stops', 'tour_purpose', 'start_tod', 'end_tod']].groupby(['tour_purpose', 'start_tod', 'end_tod']).sum().reset_index().sort(['end_tod', 'start_tod', 'tour_purpose'])
+jstops_ob_tod = tables['unique_joint_tours'][['num_ob_stops', 'tour_purpose', 'start_tod', 'end_tod']].groupby(['tour_purpose', 'start_tod', 'end_tod']).sum().reset_index().sort(['end_tod', 'start_tod', 'tour_purpose'])
 
-stops_ib_tod.to_csv(vizOutputDir + r'\todStopsIB.csv', index = False)
-stops_ob_tod.to_csv(vizOutputDir + r'\todStopsOB.csv', index = False)
-jstops_ib_tod.to_csv(vizOutputDir + r'\todStopsIB_joint.csv', index = False)
-jstops_ob_tod.to_csv(vizOutputDir + r'\todStopsOB_joint.csv', index = False)
+stops_ib_tod.to_csv(WD + r'\todStopsIB.csv', index = False)
+stops_ob_tod.to_csv(WD + r'\todStopsOB.csv', index = False)
+jstops_ib_tod.to_csv(WD + r'\todStopsIB_joint.csv', index = False)
+jstops_ob_tod.to_csv(WD + r'\todStopsOB_joint.csv', index = False)
 
 # prepare input for visualizer
-todDepProfile_vis = todDepProfile.reset_index().rename(columns = {'start_period': 'id'})
+todDepProfile_vis = todDepProfile.reset_index().rename(columns = {'start_period': 'id', 'index': 'id'})
 todDepProfile_vis = pd.melt(todDepProfile_vis, ['id']).rename(columns = {'variable': 'purpose', 'value': 'freq_dep'})
-todArrProfile_vis = todArrProfile.reset_index().rename(columns = {'end_period': 'id'})
+todArrProfile_vis = todArrProfile.reset_index().rename(columns = {'end_period': 'id', 'index': 'id'})
 todArrProfile_vis = pd.melt(todArrProfile_vis, ['id']).rename(columns = {'variable': 'purpose', 'value': 'freq_arr'})
-todDurProfile_vis = todDurProfile.reset_index().rename(columns = {'tourdur': 'id'})
+todDurProfile_vis = todDurProfile.reset_index().rename(columns = {'tourdur': 'id', 'index': 'id'})
 todDurProfile_vis = pd.melt(todDurProfile_vis, ['id']).rename(columns = {'variable': 'purpose', 'value': 'freq_dur'})
 
 todProfile_vis = todDepProfile_vis.copy()
 todProfile_vis['freq_arr'] = todArrProfile_vis['freq_arr']
 todProfile_vis['freq_dur'] = todDurProfile_vis['freq_dur']
-todProfile_vis = todProfile_vis.sort_values(['id', 'purpose']).fillna(0)
-todProfile_vis.to_csv(vizOutputDir + r'\todProfile_vis.csv')
+todProfile_vis = todProfile_vis.sort(['id', 'purpose']).fillna(0)
+todProfile_vis.to_csv(WD + r'\todProfile_vis.csv')
 
 t9 = time.time()
 print(t9 - t8)
@@ -998,13 +1028,17 @@ tmodeAS0Profile = SummarizeTourMode(tables['tours'], tables['unique_joint_tours'
 tmodeAS1Profile = SummarizeTourMode(tables['tours'], tables['unique_joint_tours'], 'AUTOSUFF == 1')
 tmodeAS2Profile = SummarizeTourMode(tables['tours'], tables['unique_joint_tours'], 'AUTOSUFF == 2')
 
-add_empty_bins(tmodeAS0Profile).to_csv(vizOutputDir + r'\tmodeAS0Profile.csv')
-add_empty_bins(tmodeAS1Profile).to_csv(vizOutputDir + r'\tmodeAS1Profile.csv')
-add_empty_bins(tmodeAS2Profile).to_csv(vizOutputDir + r'\tmodeAS2Profile.csv')
+add_empty_bins(tmodeAS0Profile).to_csv(WD + r'\tmodeAS0Profile.csv')
+add_empty_bins(tmodeAS1Profile).to_csv(WD + r'\tmodeAS1Profile.csv')
+add_empty_bins(tmodeAS2Profile).to_csv(WD + r'\tmodeAS2Profile.csv')
 
-tmodeAS0Profile_vis = pd.melt(tmodeAS0Profile.reset_index(), ['TOURMODE']).rename(columns = {'TOURMODE': 'id', 'variable': 'purpose', 'value': 'freq_as0'}).set_index(['id', 'purpose'])
-tmodeAS1Profile_vis = pd.melt(tmodeAS1Profile.reset_index(), ['TOURMODE']).rename(columns = {'TOURMODE': 'id', 'variable': 'purpose', 'value': 'freq_as1'}).set_index(['id', 'purpose'])
-tmodeAS2Profile_vis = pd.melt(tmodeAS2Profile.reset_index(), ['TOURMODE']).rename(columns = {'TOURMODE': 'id', 'variable': 'purpose', 'value': 'freq_as2'}).set_index(['id', 'purpose'])
+tmodeAS0Profile['TOURMODE'] = tmodeAS0Profile.index
+tmodeAS1Profile['TOURMODE'] = tmodeAS1Profile.index
+tmodeAS2Profile['TOURMODE'] = tmodeAS2Profile.index
+
+tmodeAS0Profile_vis = pd.melt(tmodeAS0Profile, ['TOURMODE']).rename(columns = {'TOURMODE': 'id', 'variable': 'purpose', 'value': 'freq_as0'}).set_index(['id', 'purpose'])
+tmodeAS1Profile_vis = pd.melt(tmodeAS1Profile, ['TOURMODE']).rename(columns = {'TOURMODE': 'id', 'variable': 'purpose', 'value': 'freq_as1'}).set_index(['id', 'purpose'])
+tmodeAS2Profile_vis = pd.melt(tmodeAS2Profile, ['TOURMODE']).rename(columns = {'TOURMODE': 'id', 'variable': 'purpose', 'value': 'freq_as2'}).set_index(['id', 'purpose'])
 
 #tmodeProfile_vis_index = pd.melt(pd.DataFrame(np.ones_like(tmodeAS0Profile), tmodeAS0Profile.index, tmodeAS0Profile.columns).reset_index(), ['TOURMODE']).set_index(['id', 'purpose']).index
 
@@ -1017,8 +1051,8 @@ tmodeProfile_vis = pd.DataFrame({'freq_as0': tmodeAS0Profile_vis['freq_as0'],
                                  'freq_as2': tmodeAS2Profile_vis['freq_as2']}).fillna(0).reset_index()
 tmodeProfile_vis['freq_all'] = tmodeProfile_vis['freq_as0'] + tmodeProfile_vis['freq_as1'] + tmodeProfile_vis['freq_as2']
 tmodeProfile_vis['id'] = tmodeProfile_vis['id'].astype(str)
-tmodeProfile_vis = tmodeProfile_vis.sort_values(['purpose', 'id'])
-tmodeProfile_vis.to_csv(vizOutputDir + r'\tmodeProfile_vis.csv', index = False) #May need to fix order
+tmodeProfile_vis = tmodeProfile_vis.sort(['purpose', 'id'])
+tmodeProfile_vis.to_csv(WD + r'\tmodeProfile_vis.csv', index = False) #May need to fix order
 
 t10 = time.time()
 print(t10 - t9)
@@ -1034,12 +1068,12 @@ tourDistProfile['jmain'] = np.histogram(tables['unique_joint_tours'][['JOINT_PUR
 tourDistProfile['jdisc'] = np.histogram(tables['unique_joint_tours'][['JOINT_PURP', 'tour_distance']].query('JOINT_PURP >= 7 and JOINT_PURP <= 9')['tour_distance'], bins)[0]
 tourDistProfile['atwork'] = np.histogram(tables['tours'][['TOURPURP', 'tour_distance']].query('TOURPURP == 10')['tour_distance'], bins)[0]
 
-tourDistProfile.to_csv(vizOutputDir + r'\nonMandTourDistProfile.csv')
+tourDistProfile.to_csv(WD + r'\nonMandTourDistProfile.csv')
 
 tourDistProfile_vis = tourDistProfile.copy()
 tourDistProfile_vis['Total'] = tourDistProfile_vis.sum(1)
 tourDistProfile_vis = pd.melt(tourDistProfile_vis.reset_index(), ['index']).rename(columns = {'index': 'distbin', 'variable': 'PURPOSE', 'value': 'freq'})
-tourDistProfile_vis.to_csv(vizOutputDir + r'\tourDistProfile_vis.csv')
+tourDistProfile_vis.to_csv(WD + r'\tourDistProfile_vis.csv')
 
 ## Output average trips lengths for visualizer
 avgTripLengths = pd.Series([tables['tours'][['TOURPURP', 'tour_distance']].query('TOURPURP == 4')['tour_distance'].mean(),
@@ -1053,7 +1087,7 @@ avgTripLengths = pd.Series([tables['tours'][['TOURPURP', 'tour_distance']].query
                            index = ["esco", "imain", "idisc", "jmain", "jdisc", "atwork", "Total"])
 
 avgTripLengths.index.name = 'purpose'
-avgTripLengths.to_csv(vizOutputDir + r'\nonMandTripLengths.csv')
+avgTripLengths.to_csv(WD + r'\nonMandTripLengths.csv')
 
 t11 = time.time()
 print(t11 - t10)
@@ -1089,9 +1123,9 @@ def summarizeStopFrequencies(itours, jtours, field, fp, tours = True):
     stopFreq.to_csv(fp)
     return stopFreq
 
-StopFreqOut = summarizeStopFrequencies(tables['tours'], tables['unique_joint_tours'], 'num_ob_stops', vizOutputDir + r'\stopFreqOutProfile.csv')
-StopFreqInb = summarizeStopFrequencies(tables['tours'], tables['unique_joint_tours'], 'num_ib_stops', vizOutputDir + r'\stopFreqInbProfile.csv')
-StopFreqTot = summarizeStopFrequencies(tables['tours'], tables['unique_joint_tours'], 'num_tot_stops', vizOutputDir + r'\stopFreqTotProfile.csv')
+StopFreqOut = summarizeStopFrequencies(tables['tours'], tables['unique_joint_tours'], 'num_ob_stops', WD + r'\stopFreqOutProfile.csv')
+StopFreqInb = summarizeStopFrequencies(tables['tours'], tables['unique_joint_tours'], 'num_ib_stops', WD + r'\stopFreqInbProfile.csv')
+StopFreqTot = summarizeStopFrequencies(tables['tours'], tables['unique_joint_tours'], 'num_tot_stops', WD + r'\stopFreqTotProfile.csv')
 
 StopFreqOut['Total'] = StopFreqOut.sum(1)
 StopFreqInb['Total'] = StopFreqInb.sum(1)
@@ -1099,17 +1133,17 @@ StopFreqTot['Total'] = StopFreqTot.sum(1)
 
 stopFreqOut_vis = pd.melt(StopFreqOut.reset_index(), ['index']).rename(columns = {'variable': 'purpose', 'index': 'nstops', 'value': 'freq_out'}).set_index(['purpose', 'nstops'])
 stopFreqInb_vis = pd.melt(StopFreqInb.reset_index(), ['index']).rename(columns = {'variable': 'purpose', 'index': 'nstops', 'value': 'freq_inb'}).set_index(['purpose', 'nstops'])
-stopFreqDir_vis = pd.DataFrame({'freq_out': stopFreqOut_vis['freq_out'], 'freq_inb': stopFreqInb_vis['freq_inb']}).reset_index()#.sort_values('nstops')
+stopFreqDir_vis = pd.DataFrame({'freq_out': stopFreqOut_vis['freq_out'], 'freq_inb': stopFreqInb_vis['freq_inb']}).reset_index()#.sort('nstops')
 
-stopFreqDir_vis.to_csv(vizOutputDir + r'\stopfreqDir_vis.csv', index = False)
+stopFreqDir_vis.to_csv(WD + r'\stopfreqDir_vis.csv', index = False)
 StopFreq_vis = pd.melt(StopFreqTot.reset_index(), ['index']).rename(columns = {'variable': 'purpose', 'index': 'nstops', 'value': 'freq'})
-StopFreq_vis.to_csv(vizOutputDir + r'\stopfreq_total_vis.csv', index = False)
+StopFreq_vis.to_csv(WD + r'\stopfreq_total_vis.csv', index = False)
 
 #Stop purpose X TourPurpose
-stopFreq = summarizeStopFrequencies(stops, jstops, 'DPURP', vizOutputDir + r'\stopPurposeByTourPurpose.csv', False)
+stopFreq = summarizeStopFrequencies(stops, jstops, 'DPURP', WD + r'\stopPurposeByTourPurpose.csv', False)
 stopFreq['Total'] = stopFreq.sum(1)
 StopFreq_vis = pd.melt(stopFreq.reset_index(), ['index']).rename(columns = {'variable': 'purpose', 'index': 'stop_purp', 'value': 'freq'})
-StopFreq_vis.to_csv(vizOutputDir + r'\stoppurpose_tourpurpose_vis.csv', index = False)
+StopFreq_vis.to_csv(WD + r'\stoppurpose_tourpurpose_vis.csv', index = False)
 
 stopFreq = pd.DataFrame(index = bins[1:-1] + [41, 42])
 stopFreq['work'] = np.histogram(stops[['TOURPURP', 'out_dir_dist']].query('TOURPURP == 1')['out_dir_dist'], [-9999] + bins)[0]
@@ -1121,11 +1155,11 @@ stopFreq['idisc'] = np.histogram(stops[['TOURPURP', 'out_dir_dist']].query('TOUR
 stopFreq['jmain'] = np.histogram(jstops[['TOURPURP', 'out_dir_dist']].query('TOURPURP >= 5 and TOURPURP <= 6')['out_dir_dist'], [-9999] + bins)[0]
 stopFreq['jdisc'] = np.histogram(jstops[['TOURPURP', 'out_dir_dist']].query('TOURPURP >= 7 and TOURPURP <= 9')['out_dir_dist'], [-9999] + bins)[0]
 stopFreq['atwork'] = np.histogram(stops[['TOURPURP', 'out_dir_dist']].query('TOURPURP == 10')['out_dir_dist'], [-9999] + bins)[0]
-stopFreq.to_csv(vizOutputDir + r'\stopOutOfDirectionDC.csv')
+stopFreq.to_csv(WD + r'\stopOutOfDirectionDC.csv')
 
 stopFreq['Total'] = stopFreq.sum(1)
 stopDC_vis = pd.melt(stopFreq.reset_index(), ['index']).rename(columns = {'index': 'distbin', 'variable': 'PURPOSE', 'value': 'freq'})
-stopDC_vis.to_csv(vizOutputDir + r'\stopDC_vis.csv', index = False)
+stopDC_vis.to_csv(WD + r'\stopDC_vis.csv', index = False)
 
 avgStopOutofDirectionDist = pd.Series([stops[['TOURPURP', 'out_dir_dist']].query('TOURPURP == 1')['out_dir_dist'].mean(),
                                        stops[['TOURPURP', 'out_dir_dist']].query('TOURPURP == 2')['out_dir_dist'].mean(), #Also not matching
@@ -1139,7 +1173,7 @@ avgStopOutofDirectionDist = pd.Series([stops[['TOURPURP', 'out_dir_dist']].query
                                        stops['out_dir_dist'].mean()],
                                       index = ["work", "univ", "sch", "esco","imain", "idisc", "jmain", "jdisc", "atwork", "total"])
 avgStopOutofDirectionDist.index.name = 'purpose'
-pd.DataFrame({'avgDist': avgStopOutofDirectionDist}).to_csv(vizOutputDir + r'\avgStopOutofDirectionDist_vis.csv')
+pd.DataFrame({'avgDist': avgStopOutofDirectionDist}).to_csv(WD + r'\avgStopOutofDirectionDist_vis.csv')
 
 StopDep = pd.DataFrame(index = bins[1:-1])
 StopDep['work'] = np.histogram(stops[['TOURPURP', 'stop_period']].query('TOURPURP == 1')['stop_period'], bins[1:])[0]
@@ -1151,7 +1185,7 @@ StopDep['idisc'] = np.histogram(stops[['TOURPURP', 'stop_period']].query('TOURPU
 StopDep['jmain'] = np.histogram(jstops[['TOURPURP', 'stop_period']].query('TOURPURP >= 5 and TOURPURP <= 6')['stop_period'], bins[1:])[0]
 StopDep['jdisc'] = np.histogram(jstops[['TOURPURP', 'stop_period']].query('TOURPURP >= 7 and TOURPURP <= 9')['stop_period'], bins[1:])[0]
 StopDep['atwork'] = np.histogram(stops[['TOURPURP', 'stop_period']].query('TOURPURP == 10')['stop_period'], bins[1:])[0]
-StopDep.to_csv(vizOutputDir + r'\stopDeparture.csv')
+StopDep.to_csv(WD + r'\stopDeparture.csv')
 
 TripDep = pd.DataFrame(index = bins[1:-1])
 TripDep['work'] = np.histogram(tables['trips'][['TOURPURP', 'stop_period']].query('TOURPURP == 1')['stop_period'], bins[1:])[0]
@@ -1163,7 +1197,7 @@ TripDep['idisc'] = np.histogram(tables['trips'][['TOURPURP', 'stop_period']].que
 TripDep['jmain'] = np.histogram(tables['jtrips'][['TOURPURP', 'stop_period']].query('TOURPURP >= 5 and TOURPURP <= 6')['stop_period'], bins[1:])[0]
 TripDep['jdisc'] = np.histogram(tables['jtrips'][['TOURPURP', 'stop_period']].query('TOURPURP >= 7 and TOURPURP <= 9')['stop_period'], bins[1:])[0]
 TripDep['atwork'] = np.histogram(tables['trips'][['TOURPURP', 'stop_period']].query('TOURPURP == 10')['stop_period'], bins[1:])[0]
-TripDep.to_csv(vizOutputDir + r'\tripDeparture.csv')
+TripDep.to_csv(WD + r'\tripDeparture.csv')
 
 StopDep['Total'] = StopDep.sum(1)
 TripDep['Total'] = TripDep.sum(1)
@@ -1171,7 +1205,7 @@ TripDep['Total'] = TripDep.sum(1)
 StopDep_vis = pd.melt(StopDep.reset_index(), ['index']).rename(columns = {'index': 'id', 'variable': 'purpose', 'value': 'freq_stop'}).set_index(['id', 'purpose'])['freq_stop']
 TripDep_vis = pd.melt(TripDep.reset_index(), ['index']).rename(columns = {'index': 'id', 'variable': 'purpose', 'value': 'freq_trip'}).set_index(['id', 'purpose'])['freq_trip']
 stopTripDep_vis = pd.DataFrame({'freq_stop': StopDep_vis, 'freq_trip': TripDep_vis}).reset_index()
-stopTripDep_vis.to_csv(vizOutputDir + r'\stopTripDep_vis.csv', index = False)
+stopTripDep_vis.to_csv(WD + r'\stopTripDep_vis.csv', index = False)
 
 t12 = time.time()
 print(t12 - t11)
@@ -1186,17 +1220,17 @@ def SummarizeTripMode(df, qry, fp):
     return tripModeProfile
 
 tripModeProfile = {}
-tripModeProfile[1] = SummarizeTripMode(tables['trips'], 'TOURPURP == 1', vizOutputDir + r'\tripModeProfile_Work.csv')
-tripModeProfile[2] = SummarizeTripMode(tables['trips'], 'TOURPURP == 2', vizOutputDir + r'\tripModeProfile_Univ.csv')
-tripModeProfile[3] = SummarizeTripMode(tables['trips'], 'TOURPURP == 3', vizOutputDir + r'\tripModeProfile_Schl.csv')
-tripModeProfile[4] = SummarizeTripMode(tables['trips'], 'TOURPURP >= 4 and TOURPURP <= 6', vizOutputDir + r'\tripModeProfile_iMain.csv')
-tripModeProfile[5] = SummarizeTripMode(tables['trips'], 'TOURPURP >= 7 and TOURPURP <= 9', vizOutputDir + r'\tripModeProfile_iDisc.csv')
-tripModeProfile[6] = SummarizeTripMode(tables['jtrips'], 'TOURPURP >= 4 and TOURPURP <= 6', vizOutputDir + r'\tripModeProfile_jMain.csv')
-tripModeProfile[7] = SummarizeTripMode(tables['jtrips'], 'TOURPURP >= 7 and TOURPURP <= 9', vizOutputDir + r'\tripModeProfile_jDisc.csv')
-tripModeProfile[8] = SummarizeTripMode(tables['trips'], 'TOURPURP == 10', vizOutputDir + r'\tripModeProfile_AtWork.csv')
-tripModeProfile[9] = SummarizeTripMode(tables['trips'], 'TOURPURP > 0', vizOutputDir + r'\tripModeProfile_Total.csv')
-tripModeProfile[9] += SummarizeTripMode(tables['jtrips'], 'TOURPURP > 0', vizOutputDir + r'\tripModeProfile_Total.csv')
-tripModeProfile[9].to_csv(vizOutputDir + r'\tripModeProfile_Total.csv')
+tripModeProfile[1] = SummarizeTripMode(tables['trips'], 'TOURPURP == 1', WD + r'\tripModeProfile_Work.csv')
+tripModeProfile[2] = SummarizeTripMode(tables['trips'], 'TOURPURP == 2', WD + r'\tripModeProfile_Univ.csv')
+tripModeProfile[3] = SummarizeTripMode(tables['trips'], 'TOURPURP == 3', WD + r'\tripModeProfile_Schl.csv')
+tripModeProfile[4] = SummarizeTripMode(tables['trips'], 'TOURPURP >= 4 and TOURPURP <= 6', WD + r'\tripModeProfile_iMain.csv')
+tripModeProfile[5] = SummarizeTripMode(tables['trips'], 'TOURPURP >= 7 and TOURPURP <= 9', WD + r'\tripModeProfile_iDisc.csv')
+tripModeProfile[6] = SummarizeTripMode(tables['jtrips'], 'TOURPURP >= 4 and TOURPURP <= 6', WD + r'\tripModeProfile_jMain.csv')
+tripModeProfile[7] = SummarizeTripMode(tables['jtrips'], 'TOURPURP >= 7 and TOURPURP <= 9', WD + r'\tripModeProfile_jDisc.csv')
+tripModeProfile[8] = SummarizeTripMode(tables['trips'], 'TOURPURP == 10', WD + r'\tripModeProfile_AtWork.csv')
+tripModeProfile[9] = SummarizeTripMode(tables['trips'], 'TOURPURP > 0', WD + r'\tripModeProfile_Total.csv')
+tripModeProfile[9] += SummarizeTripMode(tables['jtrips'], 'TOURPURP > 0', WD + r'\tripModeProfile_Total.csv')
+tripModeProfile[9].to_csv(WD + r'\tripModeProfile_Total.csv')
 
 tripModeProfile_vis = pd.DataFrame()
 purps = ["",  "work", "univ", "schl", "imain", "idisc", "jmain", "jdisc", "atwork", "total"]
@@ -1223,7 +1257,7 @@ tripModeProfile_vis['tourmode'] = tripModeProfile_vis['tourmode'].map({'tourmode
 temp = pd.melt(tripModeProfile_vis, ['tripmode', 'tourmode'])
 temp['grp_var'] = temp['variable'] + temp['tourmode']
 temp = temp.rename(columns = {'variable': 'purpose'})
-temp.to_csv(vizOutputDir + r'\tripModeProfile_vis.csv')
+temp.to_csv(WD + r'\tripModeProfile_vis.csv')
 
 ###
 #trip mode by time period
@@ -1231,11 +1265,11 @@ temp.to_csv(vizOutputDir + r'\tripModeProfile_vis.csv')
 tables['trips']['tod'] = tables['trips']['stop_period'].apply(classify_tod)
 tables['jtrips']['tod'] = tables['jtrips']['stop_period'].apply(classify_tod)
 
-itrips_summary = tables['trips'][['tod', 'TOURPURP', 'TOURMODE', 'TRIPMODE']].value_counts().reset_index().sort_values(['TRIPMODE', 'TOURMODE', 'TOURPURP', 'tod']).rename(columns = {0: 'num_trips'})
-jtrips_summary = tables['jtrips'][['tod', 'TOURPURP', 'TOURMODE', 'TRIPMODE']].value_counts().reset_index().sort_values(['TRIPMODE', 'TOURMODE', 'TOURPURP', 'tod']).rename(columns = {0: 'num_trips'})
+itrips_summary = count(tables['trips'], ['tod', 'TOURPURP', 'TOURMODE', 'TRIPMODE']).reset_index().sort(['TRIPMODE', 'TOURMODE', 'TOURPURP', 'tod']).rename(columns = {0: 'num_trips'})
+jtrips_summary = count(tables['jtrips'], ['tod', 'TOURPURP', 'TOURMODE', 'TRIPMODE']).reset_index().sort(['TRIPMODE', 'TOURMODE', 'TOURPURP', 'tod']).rename(columns = {0: 'num_trips'})
 
-itrips_summary.to_csv(vizOutputDir + r'\itrips_tripmode_summary.csv', index = False)
-jtrips_summary.to_csv(vizOutputDir + r'\jtrips_tripmode_summary.csv', index = False)
+itrips_summary.to_csv(WD + r'\itrips_tripmode_summary.csv', index = False)
+jtrips_summary.to_csv(WD + r'\jtrips_tripmode_summary.csv', index = False)
 
 t13 = time.time()
 print(t13 - t12)
@@ -1254,15 +1288,15 @@ total_vmt = tables['trips']['vmt'].sum()
 
 totals_df = pd.Series([total_population, total_households, total_tours, total_trips, total_stops, total_vmt],
                       ["total_population", "total_households", "total_tours", "total_trips", "total_stops", "total_vmt"])
-totals_df.to_csv(vizOutputDir + r'\totals.csv')
+totals_df.to_csv(WD + r'\totals.csv')
 
 # HH Size distribution
 hhSizeDist = pd.DataFrame({'freq': tables['hh']['HHSIZE'].value_counts().sort_index()})
-hhSizeDist.to_csv(vizOutputDir + r'\hhSizeDist.csv')
+hhSizeDist.to_csv(WD + r'\hhSizeDist.csv')
 
 # Persons by person type
 actpertypeDistbn = tables['per'][['activity_pattern', 'PERTYPE']].query('activity_pattern != "H"')['PERTYPE'].value_counts().sort_index().reset_index().rename(columns = {'index': 'PERTYPE', 'PERTYPE': 'freq'})
-actpertypeDistbn.to_csv(vizOutputDir + r'\activePertypeDistbn.csv')
+actpertypeDistbn.to_csv(WD + r'\activePertypeDistbn.csv')
 
 t14 = time.time()
 print(t14 - t13)
@@ -1312,10 +1346,10 @@ print(9)
 active_workers['active_student'] = active_workers['hh_id'].map(hh_active_student).fillna(0)
 print(10)
 #list of workers who did ride share or pure escort for school student
-out_rs_workers = tables['tours'][['hh_id', 'person_num', 'tour_id2', 'tour_purpose', 'escort_type_out', 'driver_num_out', 'out_chauffuer_ptype']].query('tour_purpose == "School" and escort_type_out == 1')[['hh_id', 'driver_num_out']].value_counts().sort_index().reset_index().rename(columns = {0: 'out_rs_escort'})
-out_pe_workers = tables['tours'][['hh_id', 'person_num', 'tour_id2', 'tour_purpose', 'escort_type_out', 'driver_num_out', 'out_chauffuer_ptype']].query('tour_purpose == "School" and escort_type_out == 2')[['hh_id', 'driver_num_out']].value_counts().sort_index().reset_index().rename(columns = {0: 'out_pe_escort'})
-inb_rs_workers = tables['tours'][['hh_id', 'person_num', 'tour_id2', 'tour_purpose', 'escort_type_in', 'driver_num_in', 'inb_chauffuer_ptype']].query('tour_purpose == "School" and escort_type_in == 1')[['hh_id', 'driver_num_in']].value_counts().sort_index().reset_index().rename(columns = {0: 'inb_rs_escort'})
-inb_pe_workers = tables['tours'][['hh_id', 'person_num', 'tour_id2', 'tour_purpose', 'escort_type_in', 'driver_num_in', 'inb_chauffuer_ptype']].query('tour_purpose == "School" and escort_type_in == 2')[['hh_id', 'driver_num_in']].value_counts().sort_index().reset_index().rename(columns = {0: 'inb_pe_escort'})
+out_rs_workers = count(tables['tours'][['hh_id', 'person_num', 'tour_id2', 'tour_purpose', 'escort_type_out', 'driver_num_out', 'out_chauffuer_ptype']].query('tour_purpose == "School" and escort_type_out == 1'), ['hh_id', 'driver_num_out']).reset_index().rename(columns = {0: 'out_rs_escort'})
+out_pe_workers = count(tables['tours'][['hh_id', 'person_num', 'tour_id2', 'tour_purpose', 'escort_type_out', 'driver_num_out', 'out_chauffuer_ptype']].query('tour_purpose == "School" and escort_type_out == 2'), ['hh_id', 'driver_num_out']).reset_index().rename(columns = {0: 'out_pe_escort'})
+inb_rs_workers = count(tables['tours'][['hh_id', 'person_num', 'tour_id2', 'tour_purpose', 'escort_type_in', 'driver_num_in', 'inb_chauffuer_ptype']].query('tour_purpose == "School" and escort_type_in == 1'), ['hh_id', 'driver_num_in']).reset_index().rename(columns = {0: 'inb_rs_escort'})
+inb_pe_workers = count(tables['tours'][['hh_id', 'person_num', 'tour_id2', 'tour_purpose', 'escort_type_in', 'driver_num_in', 'inb_chauffuer_ptype']].query('tour_purpose == "School" and escort_type_in == 2'), ['hh_id', 'driver_num_in']).reset_index().rename(columns = {0: 'inb_pe_escort'})
 print(11)
 active_workers = active_workers.merge(out_rs_workers, 'left', left_on = ['hh_id', 'person_num'], right_on = ['hh_id', 'driver_num_out'])
 active_workers = active_workers.merge(out_pe_workers, 'left', left_on = ['hh_id', 'person_num'], right_on = ['hh_id', 'driver_num_out'])
@@ -1347,25 +1381,30 @@ ptype_map[7] = 'Non-DrivStudent'
 ptype_map[8] = 'Pre-Schooler'
 ptype_map['Total'] = 'Total'
 
+#out_table1['escort_type_out'] = out_table1.index
+#inb_table1['escort_type_in'] = inb_table1.index
 out_table1 = pd.melt(out_table1.reset_index(), ['escort_type_out']).rename(columns = {'escort_type_out': 'esc_type', 'person_type': 'child_type', 'value': 'freq_out'})
 inb_table1 = pd.melt(inb_table1.reset_index(), ['escort_type_in']).rename(columns = {'escort_type_in': 'esc_type', 'person_type': 'child_type', 'value': 'freq_inb'})
 table1 = out_table1.merge(inb_table1, on = ['esc_type', 'child_type'])
 table1['esc_type'] = table1['esc_type'].map(esctype_map)
 table1['child_type'] = table1['child_type'].map(ptype_map)
 
+#out_table2['escort_type_out'] = out_table2.index
+#inb_table2['escort_type_in'] = inb_table2.index
 out_table2 = pd.melt(out_table2.reset_index(), ['escort_type_out']).rename(columns = {'escort_type_out': 'esc_type', 'out_chauffuer_ptype': 'chauffuer', 'value': 'freq_out'})
 inb_table2 = pd.melt(inb_table2.reset_index(), ['escort_type_in']).rename(columns = {'escort_type_in': 'esc_type', 'inb_chauffuer_ptype': 'chauffuer', 'value': 'freq_inb'})
 table2 = out_table2.merge(inb_table2, on = ['esc_type', 'chauffuer'])
 table2['esc_type'] = table2['esc_type'].map(esctype_map)
 table2['chauffuer'] = table2['chauffuer'].map(ptype_map)
 
-worker_table = worker_table.reset_index().rename(columns = {**{'out_escort_type': 'DropOff'}, **esctype_map})
+esctype_map['out_escort_type'] = 'DropOff'
+worker_table = worker_table.reset_index().rename(columns = esctype_map)
 worker_table['DropOff'] = worker_table['DropOff'].map(esctype_map)
 
 ## write outputs
-table1.to_csv(vizOutputDir + r'\esctype_by_childtype.csv', index = False)
-table2.to_csv(vizOutputDir + r'\esctype_by_chauffeurtype.csv', index = False)
-worker_table.to_csv(vizOutputDir + r'\worker_school_escorting.csv', index = False)
+table1.to_csv(WD + r'\esctype_by_childtype.csv', index = False)
+table2.to_csv(WD + r'\esctype_by_chauffeurtype.csv', index = False)
+worker_table.to_csv(WD + r'\worker_school_escorting.csv', index = False)
 
 t15 = time.time()
 print(t15 - t14)
@@ -1384,9 +1423,9 @@ unique_joint_tours_transit = tables['unique_joint_tours'][['ODISTRICT', 'DDISTRI
 
 tours_transit_all = pd.concat([tours_transit, unique_joint_tours_transit])
 
-#district_flow_tours = tours_transit_all.groupby(['tour_mode', 'ODISTRICT', 'DDISTRICT']).sum()['NUMBER_HH'].reset_index().sort_values(['DDISTRICT', 'ODISTRICT', 'tour_mode'])
+#district_flow_tours = tours_transit_all.groupby(['tour_mode', 'ODISTRICT', 'DDISTRICT']).sum()['NUMBER_HH'].reset_index().sort(['DDISTRICT', 'ODISTRICT', 'tour_mode'])
 district_flow_tours = get_flow_by_mode(tours_transit_all, 'tour_mode', 'ODISTRICT', 'DDISTRICT', 'NUMBER_HH')
-district_flow_tours.to_csv(vizOutputDir + r'\district_flow_transit_tours.csv')
+district_flow_tours.to_csv(WD + r'\district_flow_transit_tours.csv')
 
 #trips
 tables['trips']['ODISTRICT'] = tables['trips']['orig_mgra'].map(tables['mazCorrespondence']['pmsa'])
@@ -1401,7 +1440,7 @@ jtrips_transit = tables['jtrips'][['ODISTRICT', 'DDISTRICT', 'trip_mode', 'num_p
 trips_transit_all = pd.concat([trips_transit, jtrips_transit])
 
 district_flow_trips = get_flow_by_mode(trips_transit_all, 'trip_mode', 'ODISTRICT', 'DDISTRICT', 'num_participants')
-district_flow_trips.to_csv(vizOutputDir + r'\district_flow_transit_trips.csv')
+district_flow_trips.to_csv(WD + r'\district_flow_transit_trips.csv')
 
 t16 = time.time()
 print(t16 - t15)
