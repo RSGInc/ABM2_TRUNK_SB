@@ -288,10 +288,10 @@ t3 = time.time()
 print(t3 - t2)
 
 print('Computing Summary Statistics')
-tables['aoResults_Pre'][['HHVEH', 'HHID']].groupby('HHVEH').count()['HHID'].reset_index().to_csv(WD + r'\autoOwnership_Pre.csv')
-tables['aoResults'][['HHVEH', 'HHID']].groupby('HHVEH').count()['HHID'].reset_index().to_csv(WD + r'\autoOwnership.csv')
-tables['hh'][['AVs', 'hh_id']].groupby('AVs').count()['hh_id'].reset_index().to_csv(WD + r'\autoOwnership_AV.csv')
-tables['hh'][['VEH_NEWCAT', 'hh_id']].groupby('VEH_NEWCAT').count()['hh_id'].reset_index().to_csv(WD + r'\autoOwnership_new.csv')
+pd.DataFrame({'freq': tables['aoResults_Pre'][['HHVEH', 'HHID']].value_counts()}).reset_index().to_csv(WD + r'\autoOwnership_Pre.csv')
+pd.DataFrame({'freq': tables['aoResults'][['HHVEH', 'HHID']].value_counts()}).reset_index().to_csv(WD + r'\autoOwnership.csv')
+pd.DataFrame({'freq': tables['hh'][['AVs', 'hh_id']].value_counts()}).reset_index().to_csv(WD + r'\autoOwnership_AV.csv')
+pd.DataFrame({'freq': tables['hh'][['VEH_NEWCAT', 'hh_id']].value_counts()}).reset_index().to_csv(WD + r'\autoOwnership_new.csv')
 
 # Zero auto HHs by TAZ
 tables['hh']['HHTAZ'] = tables['hh']['home_mgra'].map(tables['mazCorrespondence']['taz'])
@@ -740,7 +740,8 @@ jtoursPertypeDistbn = pd.DataFrame({'freq': temp_joint['PERTYPE'].astype(int).va
 # Total tours by person type for visualizer
 totaltoursPertypeDistbn = toursPertypeDistbn.copy()
 totaltoursPertypeDistbn['freq'] += jtoursPertypeDistbn['freq']
-totaltoursPertypeDistbn.to_csv(WD + r'\total_tours_by_pertype_vis.csv', index = False)
+totaltoursPertypeDistbn.index.name = 'PERTYPE'
+totaltoursPertypeDistbn.to_csv(WD + r'\total_tours_by_pertype_vis.csv')
 
 # Total inidi NM tours by person type and purpose
 tours_pertype_purpose = pd.DataFrame({'freq': tables['tours'].query('TOURPURP >= 4 and TOURPURP <= 9')[['PERTYPE', 'TOURPURP']].value_counts().sort_index()}).reset_index()
@@ -1274,6 +1275,7 @@ totals_df.to_csv(WD + r'\totals.csv')
 
 # HH Size distribution
 hhSizeDist = pd.DataFrame({'freq': tables['hh']['HHSIZE'].value_counts().sort_index()})
+hhSizeDist.index.name = 'HHSIZE'
 hhSizeDist.to_csv(WD + r'\hhSizeDist.csv')
 
 # Persons by person type
@@ -1288,8 +1290,8 @@ print('Generating school escorting summaries')
 # get driver person type
 
 tables['per']['hhper_id'] = 100*tables['per']['hh_id'] + tables['per']['person_num']
-tables['tours']['out_chauffuer_ptype'] = (100*tables['tours']['hh_id'] + tables['tours']['driver_num_out']).map(tables['per'].set_index('hhper_id')['PERTYPE'])
-tables['tours']['inb_chauffuer_ptype'] = (100*tables['tours']['hh_id'] + tables['tours']['driver_num_in']).map(tables['per'].set_index('hhper_id')['PERTYPE'])
+tables['tours']['out_chauffeur_ptype'] = (100*tables['tours']['hh_id'] + tables['tours']['driver_num_out']).map(tables['per'].set_index('hhper_id')['PERTYPE'])
+tables['tours']['inb_chauffeur_ptype'] = (100*tables['tours']['hh_id'] + tables['tours']['driver_num_in']).map(tables['per'].set_index('hhper_id')['PERTYPE'])
 
 tables['tours'] = tables['tours'].fillna(0)
 print(1)
@@ -1303,13 +1305,13 @@ print(3)
 out_table1 = pd.crosstab(tours_sample['escort_type_out'], tours_sample['person_type'])
 inb_table1 = pd.crosstab(tours_sample['escort_type_in'], tours_sample['person_type'])
 print(4)
-# School tours by Escort Type X Chauffuer Type
-out_sample2 = tours_sample.query('out_chauffuer_ptype > 0')
-inb_sample2 = tours_sample.query('inb_chauffuer_ptype > 0')
+# School tours by Escort Type X chauffeur Type
+out_sample2 = tours_sample.query('out_chauffeur_ptype > 0')
+inb_sample2 = tours_sample.query('inb_chauffeur_ptype > 0')
 #out_table2 = out_sample2[['escort_type_out', 'person_type']]
 #inb_table2 = inb_sample2[['escort_type_out', 'person_type']]
-out_table2 = pd.crosstab(out_sample2['escort_type_out'], out_sample2['out_chauffuer_ptype'])
-inb_table2 = pd.crosstab(inb_sample2['escort_type_in'], inb_sample2['inb_chauffuer_ptype'])
+out_table2 = pd.crosstab(out_sample2['escort_type_out'], out_sample2['out_chauffeur_ptype'])
+inb_table2 = pd.crosstab(inb_sample2['escort_type_in'], inb_sample2['inb_chauffeur_ptype'])
 print(5)
 ## Workers summary
 # summary of worker with a child which went to school
@@ -1328,10 +1330,10 @@ print(9)
 active_workers['active_student'] = active_workers['hh_id'].map(hh_active_student).fillna(0)
 print(10)
 #list of workers who did ride share or pure escort for school student
-out_rs_workers = tables['tours'][['hh_id', 'person_num', 'tour_id2', 'tour_purpose', 'escort_type_out', 'driver_num_out', 'out_chauffuer_ptype']].query('tour_purpose == "School" and escort_type_out == 1')[['hh_id', 'driver_num_out']].value_counts().sort_index().reset_index().rename(columns = {0: 'out_rs_escort'})
-out_pe_workers = tables['tours'][['hh_id', 'person_num', 'tour_id2', 'tour_purpose', 'escort_type_out', 'driver_num_out', 'out_chauffuer_ptype']].query('tour_purpose == "School" and escort_type_out == 2')[['hh_id', 'driver_num_out']].value_counts().sort_index().reset_index().rename(columns = {0: 'out_pe_escort'})
-inb_rs_workers = tables['tours'][['hh_id', 'person_num', 'tour_id2', 'tour_purpose', 'escort_type_in', 'driver_num_in', 'inb_chauffuer_ptype']].query('tour_purpose == "School" and escort_type_in == 1')[['hh_id', 'driver_num_in']].value_counts().sort_index().reset_index().rename(columns = {0: 'inb_rs_escort'})
-inb_pe_workers = tables['tours'][['hh_id', 'person_num', 'tour_id2', 'tour_purpose', 'escort_type_in', 'driver_num_in', 'inb_chauffuer_ptype']].query('tour_purpose == "School" and escort_type_in == 2')[['hh_id', 'driver_num_in']].value_counts().sort_index().reset_index().rename(columns = {0: 'inb_pe_escort'})
+out_rs_workers = tables['tours'][['hh_id', 'person_num', 'tour_id2', 'tour_purpose', 'escort_type_out', 'driver_num_out', 'out_chauffeur_ptype']].query('tour_purpose == "School" and escort_type_out == 1')[['hh_id', 'driver_num_out']].value_counts().sort_index().reset_index().rename(columns = {0: 'out_rs_escort'})
+out_pe_workers = tables['tours'][['hh_id', 'person_num', 'tour_id2', 'tour_purpose', 'escort_type_out', 'driver_num_out', 'out_chauffeur_ptype']].query('tour_purpose == "School" and escort_type_out == 2')[['hh_id', 'driver_num_out']].value_counts().sort_index().reset_index().rename(columns = {0: 'out_pe_escort'})
+inb_rs_workers = tables['tours'][['hh_id', 'person_num', 'tour_id2', 'tour_purpose', 'escort_type_in', 'driver_num_in', 'inb_chauffeur_ptype']].query('tour_purpose == "School" and escort_type_in == 1')[['hh_id', 'driver_num_in']].value_counts().sort_index().reset_index().rename(columns = {0: 'inb_rs_escort'})
+inb_pe_workers = tables['tours'][['hh_id', 'person_num', 'tour_id2', 'tour_purpose', 'escort_type_in', 'driver_num_in', 'inb_chauffeur_ptype']].query('tour_purpose == "School" and escort_type_in == 2')[['hh_id', 'driver_num_in']].value_counts().sort_index().reset_index().rename(columns = {0: 'inb_pe_escort'})
 print(11)
 active_workers = active_workers.merge(out_rs_workers, 'left', left_on = ['hh_id', 'person_num'], right_on = ['hh_id', 'driver_num_out'])
 active_workers = active_workers.merge(out_pe_workers, 'left', left_on = ['hh_id', 'person_num'], right_on = ['hh_id', 'driver_num_out'])
@@ -1369,11 +1371,11 @@ table1 = out_table1.merge(inb_table1, on = ['esc_type', 'child_type'])
 table1['esc_type'] = table1['esc_type'].map(esctype_map)
 table1['child_type'] = table1['child_type'].map(ptype_map)
 
-out_table2 = pd.melt(out_table2.reset_index(), ['escort_type_out']).rename(columns = {'escort_type_out': 'esc_type', 'out_chauffuer_ptype': 'chauffuer', 'value': 'freq_out'})
-inb_table2 = pd.melt(inb_table2.reset_index(), ['escort_type_in']).rename(columns = {'escort_type_in': 'esc_type', 'inb_chauffuer_ptype': 'chauffuer', 'value': 'freq_inb'})
-table2 = out_table2.merge(inb_table2, on = ['esc_type', 'chauffuer'])
+out_table2 = pd.melt(out_table2.reset_index(), ['escort_type_out']).rename(columns = {'escort_type_out': 'esc_type', 'out_chauffeur_ptype': 'chauffeur', 'value': 'freq_out'})
+inb_table2 = pd.melt(inb_table2.reset_index(), ['escort_type_in']).rename(columns = {'escort_type_in': 'esc_type', 'inb_chauffeur_ptype': 'chauffeur', 'value': 'freq_inb'})
+table2 = out_table2.merge(inb_table2, on = ['esc_type', 'chauffeur'])
 table2['esc_type'] = table2['esc_type'].map(esctype_map)
-table2['chauffuer'] = table2['chauffuer'].map(ptype_map)
+table2['chauffeur'] = table2['chauffeur'].map(ptype_map)
 
 esctype_map['out_escort_type'] = 'DropOff'
 worker_table = worker_table.reset_index().rename(columns = esctype_map)
