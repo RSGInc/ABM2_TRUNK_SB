@@ -57,6 +57,7 @@ call %PYTHON_ENV%\Scripts\activate.bat %PYTHON_ENV%
 call conda env list | find /i "viz"
 if not errorlevel 1 (
 	call conda env update --name viz --file %WORKING_DIR%environment.yaml
+	call activate viz
 ) else (
 	call conda env create -f %WORKING_DIR%environment.yaml
 )
@@ -76,10 +77,7 @@ ECHO ABMOutputDir,%ABMOutputDir% >> %INPUT_FILE_ABM%
 ECHO geogXWalkDir,%WORKING_DIR%data >> %INPUT_FILE_ABM%
 ECHO SkimDir,%ABMOutputDir% >> %INPUT_FILE_ABM%
 ECHO MAX_ITER,%MAX_ITER% >> %INPUT_FILE_ABM%
-:: Call R script to summarize BUILD outputs
-ECHO %startTime%%Time%: Running R script to summarize BUILD outputs...
-call python %WORKING_DIR%scripts\SummarizeABM2016.py %INPUT_FILE_ABM%
-::%R_SCRIPT% %WORKING_DIR%scripts\SummarizeABM2016.R %INPUT_FILE_ABM%
+
 
 :: Summarize REF
 SET WD=%BASE_SUMMARY_DIR%
@@ -92,9 +90,7 @@ ECHO geogXWalkDir,%WORKING_DIR%data >> %INPUT_FILE_REF%
 ECHO SkimDir,%REF_DIR% >> %INPUT_FILE_REF%
 ECHO MAX_ITER,%MAX_ITER% >> %INPUT_FILE_REF%
 
-:: Call R script to summarize REF outputs
-ECHO %startTime%%Time%: Running R script to summarize REF outputs...
-%R_SCRIPT% %WORKING_DIR%scripts\SummarizeABM2016.R %INPUT_FILE_REF%
+
 
 :: Create Visualizer
 :: Parameters file 
@@ -119,13 +115,23 @@ ECHO MAX_ITER,%MAX_ITER% >> %PARAMETERS_FILE%
 ECHO geogXWalkDir,%WORKING_DIR%data >> %PARAMETERS_FILE%
 ECHO mgraInputFile,%MGRA_INPUT_FILE% >> %PARAMETERS_FILE%
 
+:: Call Python script to summarize BUILD outputs
+ECHO %startTime%%Time%: Running Python script to summarize BUILD outputs...
+call python %WORKING_DIR%scripts\SummarizeABM2016.py %INPUT_FILE_ABM% %PARAMETERS_FILE% FALSE
+::%R_SCRIPT% %WORKING_DIR%scripts\SummarizeABM2016.R %INPUT_FILE_ABM%
+
+:: Call R script to summarize REF outputs
+ECHO %startTime%%Time%: Running Python script to summarize REF outputs...
+call python %WORKING_DIR%scripts\SummarizeABM2016.py %INPUT_FILE_REF% %PARAMETERS_FILE% TRUE
+::%R_SCRIPT% %WORKING_DIR%scripts\SummarizeABM2016.py %INPUT_FILE_REF%
+
 :: Call the R Script to process REF and BUILD output
 :: #######################################
-ECHO %startTime%%Time%: Running R script to process REF output...
-%R_SCRIPT% %WORKING_DIR%scripts\workersByMAZ.R %PARAMETERS_FILE% TRUE
+::ECHO %startTime%%Time%: Running R script to process REF output...
+::%R_SCRIPT% %WORKING_DIR%scripts\workersByMAZ.R %PARAMETERS_FILE% TRUE
 
-ECHO %startTime%%Time%: Running R script to process BUILD output...
-%R_SCRIPT% %WORKING_DIR%scripts\workersByMAZ.R %PARAMETERS_FILE% FALSE
+::ECHO %startTime%%Time%: Running R script to process BUILD output...
+::%R_SCRIPT% %WORKING_DIR%scripts\workersByMAZ.R %PARAMETERS_FILE% FALSE
 
 :: Call the master R script
 :: ########################
@@ -136,6 +142,8 @@ IF %ERRORLEVEL% EQU 11 (
    EXIT /b %errorlevel%
 )
 ECHO %startTime%%Time%: Dashboard creation complete...
+
+pause
 
 conda deactivate
 conda deactivate

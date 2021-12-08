@@ -104,12 +104,24 @@ def add_empty_bins(df):
 #WD = r'C:\test\visualizer_conversion\visualizer\outputs\summaries\BUILD'#os.path.split(ABMOutputDir)[0] + r'\visualizer\outputs\summaries\BUILD'
 
 input_file = sys.argv[1]
+parameter_file = sys.argv[2]
+REF = sys.argv[3]
+
+print('Reading Parameter Files')
 inputs = pd.read_csv(input_file, index_col = 0)['Value ']
 WD = inputs['WD'][:-1]
 ABMOutputDir = inputs['ABMOutputDir'][:-1]
 geogXWalkDir = inputs['geogXWalkDir'][:-1]
 SkimDir = inputs['SkimDir'][:-1]
 MAX_ITER = inputs['MAX_ITER'][:-1]
+
+parameters = pd.read_csv(parameter_file, index_col = 0)['Value ']
+if REF.upper() == 'TRUE':
+    ABMInputDir = parameters['REF_DIR_INP'][:-1]
+else:
+    ABMInputDir = parameters['PROJECT_DIR'][:-1] + r'\input'
+BUILD_SAMPLE_RATE = float(parameters['BUILD_SAMPLE_RATE'][:-1])
+mazFile = os.path.split(parameters['mgraInputFile'][:-1])[1]
 
 try:
     os.mkdir(WD)
@@ -126,7 +138,9 @@ input_files = {'hh':                    ABMOutputDir + r'\householdData_{}.csv'.
                'aoResults':             ABMOutputDir + r'\aoResults.csv',
                'aoResults_Pre':         ABMOutputDir + r'\aoResults_Pre.csv',
                'visitor_trips':         ABMOutputDir + r'\visitorTrips.csv',
-               'mazCorrespondence':     geogXWalkDir + r'\geographicXwalk_PMSA.csv'
+               'mazData':               ABMInputDir + '\\' + mazFile,
+               'mazCorrespondence':     geogXWalkDir + r'\geographicXwalk_PMSA.csv',
+               'occFac':                geogXWalkDir + r'\occFactors.csv'
                }
 skim_file = SkimDir + r'\MD_SOV_TR_H_DIST.csv'
 
@@ -193,31 +207,6 @@ for i in range(maxtrips):
                                               np.hstack(([0], tables['trips']['to_subtract'].iloc[:-1])),
                                               tables['trips']['to_subtract'])
 tables['trips']['tour_id2'] = tables['trips']['cummulative_tours'] - tables['trips']['to_subtract']
-#tables['trips']['end_wb_tour'] = (tables['trips']['tour_purpose'] == 'Work-Based') | (tables['trips']['dest_purpose'] == 'Work')
-
-##Update joint tour and trip files so that tours have unique IDs
-#maxtours = tables['unique_joint_tours']['person_id'].value_counts().max() # Maximum number of tours a person makes in a day
-#tables['unique_joint_tours']['cummulative_tours'] = range(tables['unique_joint_tours'].shape[0])
-#tables['unique_joint_tours']['last_person'] = np.hstack(([0], tables['unique_joint_tours']['person_id'][:-1]))
-#tables['unique_joint_tours']['new_person'] = (tables['unique_joint_tours']['person_id']) != (tables['unique_joint_tours']['last_person'])
-#tables['unique_joint_tours']['to_subtract'] = tables['unique_joint_tours']['new_person'] * np.hstack(([0], tables['unique_joint_tours']['cummulative_tours'].iloc[:-1]))
-#for i in range(maxtours):
-#    tables['unique_joint_tours']['to_subtract'] = np.where(tables['unique_joint_tours']['to_subtract'] == 0,
-#                                                           np.hstack(([0], tables['unique_joint_tours']['to_subtract'].iloc[:-1])),
-#                                                           tables['unique_joint_tours']['to_subtract'])
-#tables['unique_joint_tours']['tour_id2'] = tables['unique_joint_tours']['cummulative_tours'] - tables['unique_joint_tours']['to_subtract']
-
-#maxtrips = tables['jtrips']['person_id'].value_counts().max() #Maximum number of trips a person makes in a day
-#tables['jtrips']['new_tour'] = (tables['jtrips']['orig_purpose'] == 'Home') | ((tables['jtrips']['tour_purpose'] == 'Work-Based') & (tables['jtrips']['orig_purpose'] == 'Work'))
-#tables['jtrips']['cummulative_tours'] = np.cumsum(tables['jtrips']['new_tour'])
-#tables['jtrips']['last_person'] = np.hstack(([0], tables['jtrips']['person_id'][:-1]))
-#tables['jtrips']['new_person'] = (tables['jtrips']['person_id']) != (tables['jtrips']['last_person'])
-#tables['jtrips']['to_subtract'] = tables['jtrips']['new_person'] * np.hstack(([0], tables['jtrips']['cummulative_tours'].iloc[:-1]))
-#for i in range(maxtrips):
-#    tables['jtrips']['to_subtract'] = np.where(tables['jtrips']['to_subtract'] == 0,
-#                                              np.hstack(([0], tables['jtrips']['to_subtract'].iloc[:-1])),
-#                                              tables['jtrips']['to_subtract'])
-#tables['jtrips']['tour_id2'] = tables['jtrips']['cummulative_tours'] - tables['jtrips']['to_subtract']
 
 t1 = time.time()
 print(t1 - t0)
@@ -1425,5 +1414,35 @@ district_flow_trips.to_csv(WD + r'\district_flow_transit_trips.csv')
 t16 = time.time()
 print(t16 - t15)
 
+print('Summarizing Workers by MGRA')
+
+# workers by occupation type
+tables['wsLoc']['num_workers'] = (1/BUILD_SAMPLE_RATE)*np.ones_like(tables['wsLoc'].index, float)
+workersbyMAZ = tables['wsLoc'][['PersonType', 'WorkLocation', 'WorkSegment', 'num_workers']].query('PersonType <= 3 and WorkLocation > 0 and WorkSegment in [0, 1, 2, 3, 4, 5]').groupby(['WorkLocation', 'WorkSegment']).sum()['num_workers'].reset_index()
+ABM_Summary = pd.crosstab(workersbyMAZ['WorkLocation'], workersbyMAZ['WorkSegment'], workersbyMAZ['num_workers'], aggfunc = max).fillna(0).rename(columns = {i: 'occ%d'%(i+1) for i in range(6)})
+ABM_Summary.index.name = 'mgra'
+
+# compute jobs by occupation type
+empCat = tables['occFac'].columns[tables['occFac'].columns != 'emp_code']
+tables['mazData'][ABM_Summary.columns] = tables['mazData'][empCat].dot(tables['occFac'][empCat].T)
+
+### get df in right format before outputting
+df1 = tables['mazData'][['mgra', 'hhs']].merge(ABM_Summary, how = 'left', on = 'mgra').fillna(0).set_index('mgra')
+del df1['hhs']
+df1['Total'] = df1.sum(1)
+df1 = pd.melt(df1.reset_index(), ['mgra']).rename(columns = {'variable': 'occp', 'value': 'workers'})
+
+df2 = tables['mazData'][["mgra","occ1", "occ2", "occ3", "occ4", "occ5", "occ6"]].fillna(0).set_index('mgra')
+df2['Total'] = df2.sum(1)
+df2 = pd.melt(df2.reset_index(), ['mgra']).rename(columns = {'variable': 'occp', 'value': 'jobs'})
+
+df = df1.merge(df2, on = ['mgra', 'occp'])
+df['DISTRICT'] = df['mgra'].map(tables['mazCorrespondence']['pmsa'])
+
+df.to_csv(WD + r'\job_worker_summary.csv')
+
+t17 = time.time()
+print(t17-t16)
+
 print('Done')
-print(t15 - t0)
+print(t16 - t0)
